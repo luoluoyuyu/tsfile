@@ -46,8 +46,7 @@ class CompressorFactory {
         } else if (type == common::SNAPPY) {
             return nullptr;
         } else if (type == common::GZIP) {
-            // ALLOC_AND_RETURN_COMPRESSPR(GZIPCompressor);
-            return nullptr;
+            ALLOC_AND_RETURN_COMPRESSPR(GZIPCompressor);
         } else if (type == common::LZO) {
             return nullptr;
         } else if (type == common::SDT) {
