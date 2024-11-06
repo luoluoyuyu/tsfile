@@ -57,9 +57,13 @@ public class FileSeriesReader extends AbstractFileSeriesReader {
       List<Chunk> valueChunkList = new ArrayList<>();
       for (IChunkMetadata metadata : alignedChunkMetadata.getValueChunkMetadataList()) {
         if (metadata != null) {
+          System.out.println(metadata);
           valueChunkList.add(chunkLoader.loadChunk((ChunkMetadata) metadata));
           currentChunkMeasurementNames.add(metadata.getMeasurementUid());
+          continue;
         }
+        valueChunkList.add(null);
+        currentChunkMeasurementNames.add(null);
       }
       this.chunkReader = new AlignedChunkReader(timeChunk, valueChunkList, filter);
     }

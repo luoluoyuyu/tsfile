@@ -6,6 +6,7 @@ import org.apache.tsfile.file.metadata.IDeviceID;
 import org.apache.tsfile.file.metadata.TableSchema;
 import org.apache.tsfile.file.metadata.enums.CompressionType;
 import org.apache.tsfile.file.metadata.enums.TSEncoding;
+import org.apache.tsfile.file.metadata.statistics.LongStatistics;
 import org.apache.tsfile.read.TsFileSequenceReader;
 import org.apache.tsfile.read.common.TimeRange;
 import org.apache.tsfile.read.common.block.TsBlock;
@@ -152,6 +153,12 @@ public class TsFileReaderEmptyChunkTest {
         }
       }
       alignedChunkWriter.writeToFileWriter(writer);
+      writer.writeEmptyValueChunk(
+          measurementNames.get(emptyChunkIndex),
+          CompressionType.LZ4,
+          TSDataType.INT64,
+          TSEncoding.PLAIN,
+          new LongStatistics());
     }
   }
 }
