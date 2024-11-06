@@ -65,7 +65,7 @@ public class TsFileReaderEmptyChunkTest {
     TableQueryExecutor tableQueryExecutor = null;
     final List<String> measurementNames = Arrays.asList("s1", "s2", "s3", "s4");
     try (TsFileIOWriter writer = new TsFileIOWriter(new File(FILE_PATH))) {
-      String tableName = "table";
+      final String tableName = "table";
       registerTableSchema(writer, tableName);
       generateDevice(writer, tableName, 1, 1, 10);
       writer.endFile();
@@ -76,16 +76,16 @@ public class TsFileReaderEmptyChunkTest {
               new MetadataQuerierByFileImpl(tsFileSequenceReader),
               new CachedChunkLoaderImpl(tsFileSequenceReader),
               TableQueryExecutor.TableQueryOrdering.DEVICE);
-      TsBlockReader tsBlockReader =
+      final TsBlockReader tsBlockReader =
           tableQueryExecutor.query(tableName, measurementNames, null, null, null);
 
       int nullValueCount = 0;
 
       while (tsBlockReader.hasNext()) {
-        TsBlock tsBlock = tsBlockReader.next();
-        TsBlock.TsBlockRowIterator iterator = tsBlock.getTsBlockRowIterator();
+        final TsBlock tsBlock = tsBlockReader.next();
+        final TsBlock.TsBlockRowIterator iterator = tsBlock.getTsBlockRowIterator();
         while (iterator.hasNext()) {
-          Object[] row = iterator.next();
+          final Object[] row = iterator.next();
           for (Object o : row) {
             if (o == null) {
               nullValueCount++;
@@ -104,8 +104,8 @@ public class TsFileReaderEmptyChunkTest {
     }
   }
 
-  private void registerTableSchema(TsFileIOWriter writer, String tableName) {
-    List<IMeasurementSchema> schemas =
+  private void registerTableSchema(final TsFileIOWriter writer, final String tableName) {
+    final List<IMeasurementSchema> schemas =
         Arrays.asList(
             new MeasurementSchema(
                 "id", TSDataType.TEXT, TSEncoding.PLAIN, CompressionType.UNCOMPRESSED),
@@ -113,14 +113,14 @@ public class TsFileReaderEmptyChunkTest {
             new MeasurementSchema("s2", TSDataType.INT64),
             new MeasurementSchema("s3", TSDataType.INT64),
             new MeasurementSchema("s4", TSDataType.INT64));
-    List<Tablet.ColumnType> columnTypes =
+    final List<Tablet.ColumnType> columnTypes =
         Arrays.asList(
             Tablet.ColumnType.ID,
             Tablet.ColumnType.MEASUREMENT,
             Tablet.ColumnType.MEASUREMENT,
             Tablet.ColumnType.MEASUREMENT,
             Tablet.ColumnType.MEASUREMENT);
-    TableSchema tableSchema = new TableSchema(tableName, schemas, columnTypes);
+    final TableSchema tableSchema = new TableSchema(tableName, schemas, columnTypes);
     writer.getSchema().registerTableSchema(tableSchema);
   }
 
@@ -132,7 +132,7 @@ public class TsFileReaderEmptyChunkTest {
       final int maxTime)
       throws IOException {
     for (int i = 0; i < deviceNum; i++) {
-      IDeviceID deviceID =
+      final IDeviceID deviceID =
           IDeviceID.Factory.DEFAULT_FACTORY.create(new String[] {tableName, "d" + i});
       writer.startChunkGroup(deviceID);
       final List<String> measurementNames = Arrays.asList("s1", "s2", "s3", "s4");
@@ -146,10 +146,10 @@ public class TsFileReaderEmptyChunkTest {
   }
 
   public void generateSimpleAlignedSeriesToCurrentDevice(
-      TsFileIOWriter writer,
-      List<String> measurementNames,
-      TimeRange[] toGenerateChunkTimeRanges,
-      int emptyChunkIndex)
+      final TsFileIOWriter writer,
+      final List<String> measurementNames,
+      final TimeRange[] toGenerateChunkTimeRanges,
+      final int emptyChunkIndex)
       throws IOException {
     List<IMeasurementSchema> measurementSchemas = new ArrayList<>();
     for (String measurementName : measurementNames) {
@@ -159,7 +159,8 @@ public class TsFileReaderEmptyChunkTest {
     }
 
     for (TimeRange toGenerateChunk : toGenerateChunkTimeRanges) {
-      AlignedChunkWriterImpl alignedChunkWriter = new AlignedChunkWriterImpl(measurementSchemas);
+      final AlignedChunkWriterImpl alignedChunkWriter =
+          new AlignedChunkWriterImpl(measurementSchemas);
       for (long time = toGenerateChunk.getMin(); time <= toGenerateChunk.getMax(); time++) {
         alignedChunkWriter.getTimeChunkWriter().write(time);
         for (int i = 0; i < measurementNames.size(); i++) {
