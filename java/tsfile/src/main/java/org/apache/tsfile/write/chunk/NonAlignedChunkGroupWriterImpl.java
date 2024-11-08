@@ -207,7 +207,8 @@ public class NonAlignedChunkGroupWriterImpl implements IChunkGroupWriter {
   }
 
   private void checkIsHistoryData(String measurementId, long time) throws WriteProcessException {
-    if (time <= lastTimeMap.getOrDefault(measurementId, Long.MIN_VALUE)) {
+    final Long lastTime = lastTimeMap.get(measurementId);
+    if (lastTime != null && time <= lastTime) {
       throw new WriteProcessException(
           "Not allowed to write out-of-order data in timeseries "
               + deviceId
