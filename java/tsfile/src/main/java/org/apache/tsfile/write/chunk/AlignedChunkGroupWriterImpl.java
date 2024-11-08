@@ -58,7 +58,8 @@ public class AlignedChunkGroupWriterImpl implements IChunkGroupWriter {
 
   private final TimeChunkWriter timeChunkWriter;
 
-  private long lastTime = -1;
+  private long lastTime = Long.MIN_VALUE;
+  private boolean isInitLastTime = false;
 
   public AlignedChunkGroupWriterImpl(IDeviceID deviceId) {
     this.deviceId = deviceId;
@@ -150,6 +151,7 @@ public class AlignedChunkGroupWriterImpl implements IChunkGroupWriter {
     }
     timeChunkWriter.write(time);
     lastTime = time;
+    isInitLastTime = true;
     if (checkPageSizeAndMayOpenANewPage()) {
       writePageToPageBuffer();
     }
@@ -224,6 +226,7 @@ public class AlignedChunkGroupWriterImpl implements IChunkGroupWriter {
       }
       timeChunkWriter.write(time);
       lastTime = time;
+      isInitLastTime = true;
       if (checkPageSizeAndMayOpenANewPage()) {
         writePageToPageBuffer();
       }
@@ -340,7 +343,7 @@ public class AlignedChunkGroupWriterImpl implements IChunkGroupWriter {
   }
 
   private void checkIsHistoryData(long time) throws WriteProcessException {
-    if (time <= lastTime) {
+    if (isInitLastTime && time <= lastTime) {
       throw new WriteProcessException(
           "Not allowed to write out-of-order data in timeseries "
               + ((PlainDeviceID) deviceId).toStringID()
@@ -360,6 +363,9 @@ public class AlignedChunkGroupWriterImpl implements IChunkGroupWriter {
   }
 
   public void setLastTime(Long lastTime) {
-    this.lastTime = lastTime;
+    if (lastTime != null) {
+      this.lastTime = lastTime;
+      isInitLastTime = true;
+    }
   }
 }
