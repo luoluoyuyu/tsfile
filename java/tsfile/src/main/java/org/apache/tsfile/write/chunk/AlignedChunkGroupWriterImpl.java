@@ -62,7 +62,7 @@ public class AlignedChunkGroupWriterImpl implements IChunkGroupWriter {
 
   private final EncryptParameter encryprParam;
 
-  private long lastTime = -1;
+  private long lastTime = Long.MIN_VALUE;
 
   public AlignedChunkGroupWriterImpl(IDeviceID deviceId) {
     this.deviceId = deviceId;

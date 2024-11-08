@@ -480,7 +480,7 @@ public class TsFileWriter implements AutoCloseable {
         groupWriter = new AlignedChunkGroupWriterImpl(deviceId, encryptParam);
         if (!isUnseq) { // Sequence File
           ((AlignedChunkGroupWriterImpl) groupWriter)
-              .setLastTime(alignedDeviceLastTimeMap.getOrDefault(deviceId, -1L));
+              .setLastTime(alignedDeviceLastTimeMap.getOrDefault(deviceId, Long.MIN_VALUE));
         }
       } else {
         groupWriter = new NonAlignedChunkGroupWriterImpl(deviceId, encryptParam);
