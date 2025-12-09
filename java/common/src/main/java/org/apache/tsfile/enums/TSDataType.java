@@ -53,7 +53,7 @@ public enum TSDataType {
   DOUBLE((byte) 4),
 
   /** TEXT. */
-  TEXT((byte) 5),
+  TEXT((byte) 5, true),
 
   /** VECTOR. */
   VECTOR((byte) 6),
@@ -68,16 +68,17 @@ public enum TSDataType {
   DATE((byte) 9),
 
   /** BLOB. */
-  BLOB((byte) 10),
+  BLOB((byte) 10, true),
 
   /** STRING */
-  STRING((byte) 11),
+  STRING((byte) 11, true),
 
   /** OBJECT */
-  OBJECT((byte) 12);
+  OBJECT((byte) 12, true);
 
   private final byte type;
   private static final Map<TSDataType, Set<TSDataType>> compatibleTypes;
+  private final boolean isBinary;
 
   static {
     compatibleTypes = new EnumMap<>(TSDataType.class);
@@ -147,7 +148,12 @@ public enum TSDataType {
   }
 
   TSDataType(byte type) {
+    this(type, false);
+  }
+
+  TSDataType(byte type, boolean isBinary) {
     this.type = type;
+    this.isBinary = isBinary;
   }
 
   /**
@@ -587,7 +593,7 @@ public enum TSDataType {
   }
 
   public boolean isBinary() {
-    return this == TEXT || this == STRING || this == BLOB || this == OBJECT;
+    return isBinary;
   }
 
   // Indicating the statistics don't contain values, such as first, last, min, max...
