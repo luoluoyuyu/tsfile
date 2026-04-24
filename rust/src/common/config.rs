@@ -75,7 +75,7 @@ impl TsFileConfig {
     }
 }
 
-/// Global TsFileConfig singleton - thread-local for Rust safety.
+// Global TsFileConfig singleton - thread-local for Rust safety.
 thread_local! {
     static INSTANCE: TsFileConfig = TsFileConfig::default();
 }

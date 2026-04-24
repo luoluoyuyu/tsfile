@@ -3,8 +3,6 @@
 
 //! Decoder trait and implementations.
 
-use std::io::Read;
-
 use crate::common::enums::{TSDataType, TSEncoding};
 use crate::error::{TsFileError, TsFileResult};
 use crate::utils::read_write_io_utils::Binary;
@@ -221,11 +219,11 @@ impl Decoder for PlainDecoder {
 }
 
 // =========================================================================
-// RLE Decoder (simplified)
+// RLE Decoder
 // =========================================================================
 
 pub struct RleDecoder {
-    data_type: TSDataType,
+    _data_type: TSDataType,
     data: Vec<u8>,
     pos: usize,
     current_run_value: i64,
@@ -235,7 +233,7 @@ pub struct RleDecoder {
 impl RleDecoder {
     pub fn new(data_type: TSDataType) -> Self {
         RleDecoder {
-            data_type,
+            _data_type: data_type,
             data: Vec::new(),
             pos: 0,
             current_run_value: 0,
@@ -305,11 +303,11 @@ impl Decoder for RleDecoder {
 }
 
 // =========================================================================
-// TS_2DIFF Decoder (simplified)
+// TS_2DIFF Decoder
 // =========================================================================
 
 pub struct Ts2diffDecoder {
-    data_type: TSDataType,
+    _data_type: TSDataType,
     data: Vec<u8>,
     pos: usize,
     last_value: i64,
@@ -320,7 +318,7 @@ pub struct Ts2diffDecoder {
 impl Ts2diffDecoder {
     pub fn new(data_type: TSDataType) -> Self {
         Ts2diffDecoder {
-            data_type,
+            _data_type: data_type,
             data: Vec::new(),
             pos: 0,
             last_value: 0,
@@ -403,11 +401,11 @@ impl Decoder for Ts2diffDecoder {
 }
 
 // =========================================================================
-// Gorilla Decoder (simplified XOR-based)
+// Gorilla Decoder
 // =========================================================================
 
 pub struct GorillaDecoder {
-    data_type: TSDataType,
+    _data_type: TSDataType,
     data: Vec<u8>,
     byte_pos: usize,
     bit_pos: u8,
@@ -418,7 +416,7 @@ pub struct GorillaDecoder {
 impl GorillaDecoder {
     pub fn new(data_type: TSDataType) -> Self {
         GorillaDecoder {
-            data_type,
+            _data_type: data_type,
             data: Vec::new(),
             byte_pos: 0,
             bit_pos: 0,

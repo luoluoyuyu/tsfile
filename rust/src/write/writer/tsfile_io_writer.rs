@@ -5,21 +5,19 @@
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Seek, SeekFrom, Write};
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use crate::common::constant::TsFileConstant;
 use crate::common::enums::MetadataIndexNodeType;
-use crate::error::{TsFileError, TsFileResult};
+use crate::error::TsFileResult;
 use crate::file::header::ChunkGroupHeader;
 use crate::file::meta_marker::MetaMarker;
 use crate::file::metadata::chunk_metadata::{ChunkGroupMetadata, ChunkMetadata};
 use crate::file::metadata::metadata_index_node::{MetadataIndexEntry, MetadataIndexNode};
 use crate::file::metadata::timeseries_metadata::TimeseriesMetadata;
 use crate::file::metadata::tsfile_metadata::TsFileMetadata;
-use crate::file::metadata::Statistics;
 use crate::utils::bloom_filter::BloomFilter;
-use crate::utils::ReadWriteIOUtils;
 
 /// Low-level TsFile writer: writes the file format including magic, version, chunks, and footer.
 ///
@@ -132,12 +130,10 @@ impl TsFileIOWriter {
         // Record the offset of the metadata section (before SEPARATOR)
         // This matches Java's: long metaOffset = out.getPosition();
         let meta_offset = self.position;
-        println!("[DEBUG] end_file: position before SEPARATOR = {}", self.position);
 
         // Write SEPARATOR marker before the metadata section
         // This matches Java's readChunkMetadataAndConstructIndexTree line 472
         self.write_byte(MetaMarker::SEPARATOR)?;
-        println!("[DEBUG] end_file: SEPARATOR (0x02) written at position {}, now at {}", meta_offset, self.position);
 
         // Build metadata index tree from chunk group metadata
         // Java iterates through ALL series (not grouped by device)
@@ -198,20 +194,25 @@ impl TsFileIOWriter {
         // Set end offset for root node
         root_device_node.end_offset = self.position as i64;
 
-        // Add bloom filter (temporarily disabled for V3 compatibility testing)
-        // let mut bloom = BloomFilter::new(0.05, self.path_count.max(1));
-        // for group in &self.chunk_group_metadata_list {
-        //     for chunk in &group.chunk_metadata_list {
-        //         bloom.add(&format!("{}.{}", group.device_id, chunk.measurement_uid));
-        //     }
-        // }
+        let mut bloom = BloomFilter::new(0.05, self.path_count.max(1));
+        for group in &self.chunk_group_metadata_list {
+            for chunk in &group.chunk_metadata_list {
+                bloom.add(&format!("{}.{}", group.device_id, chunk.measurement_uid));
+            }
+        }
 
         // Build TsFileMetadata
         let mut file_metadata = TsFileMetadata::new();
         file_metadata.meta_offset = meta_offset as i64;
-        // file_metadata.bloom_filter = Some(bloom);  // Disabled for now
+        file_metadata.bloom_filter = Some(bloom);
+        file_metadata.add_property("encryptLevel".to_string(), "0".to_string());
+        file_metadata.add_property(
+            "encryptType".to_string(),
+            "org.apache.tsfile.encrypt.UNENCRYPTED".to_string(),
+        );
+        file_metadata.add_property("encryptKey".to_string(), String::new());
 
-        // For V3, add the root device node directly (will be inlined)
+        // Empty table name is used by Java for tree-model device metadata.
         file_metadata.add_table_metadata_index_node(String::new(), root_device_node);
 
         // Serialize the TsFileMetadata
@@ -316,48 +317,4 @@ impl TsFileIOWriter {
         Ok(leaf_node)
     }
 
-    /// Build a map of device -> list of TimeseriesMetadata from chunk group metadata.
-    fn build_timeseries_metadata_map(
-        &self,
-    ) -> TsFileResult<HashMap<String, Vec<TimeseriesMetadata>>> {
-        let mut result: HashMap<String, Vec<TimeseriesMetadata>> = HashMap::new();
-
-        for group in &self.chunk_group_metadata_list {
-            let device_ts_list = result.entry(group.device_id.clone()).or_default();
-
-            for chunk_meta in &group.chunk_metadata_list {
-                // Find or create the TimeseriesMetadata for this measurement
-                let ts_meta = device_ts_list
-                    .iter_mut()
-                    .find(|t| t.measurement_id == chunk_meta.measurement_uid);
-
-                if let Some(ts_meta) = ts_meta {
-                    ts_meta.statistics.merge(&chunk_meta.statistics);
-                    ts_meta.data_size_of_chunks += chunk_meta
-                        .statistics
-                        .serialized_size() as u32
-                        + 8;
-                    ts_meta.chunk_metadata_list.push(chunk_meta.clone());
-                    // Update type: if we now have multiple chunks, set has_statistics flag
-                    if ts_meta.chunk_metadata_list.len() > 1 {
-                        ts_meta.time_series_metadata_type = 1;
-                    }
-                } else {
-                    // time_series_metadata_type: bit 0-5 indicates if chunk has statistics
-                    // Will be updated as we add more chunks
-                    let has_statistics = 0; // Start with 0, will be set to 1 if multiple chunks
-                    let mut ts_meta = TimeseriesMetadata::new(
-                        has_statistics,
-                        chunk_meta.measurement_uid.clone(),
-                        chunk_meta.data_type,
-                        chunk_meta.statistics.clone(),
-                    );
-                    ts_meta.chunk_metadata_list.push(chunk_meta.clone());
-                    device_ts_list.push(ts_meta);
-                }
-            }
-        }
-
-        Ok(result)
-    }
 }

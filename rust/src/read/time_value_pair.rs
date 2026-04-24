@@ -31,3 +31,51 @@ impl TimeValuePair {
         TimeValuePair { timestamp, value }
     }
 }
+
+impl TimeValue {
+    pub fn is_null(&self) -> bool {
+        matches!(self, TimeValue::Null)
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            TimeValue::Boolean(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn as_i32(&self) -> Option<i32> {
+        match self {
+            TimeValue::Int32(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            TimeValue::Int64(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn as_f32(&self) -> Option<f32> {
+        match self {
+            TimeValue::Float(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            TimeValue::Double(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn as_binary(&self) -> Option<&Binary> {
+        match self {
+            TimeValue::Text(value) => Some(value),
+            _ => None,
+        }
+    }
+}

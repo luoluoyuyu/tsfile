@@ -8,11 +8,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::common::enums::TSDataType;
 use crate::error::{TsFileError, TsFileResult};
 use crate::file::metadata::chunk_metadata::ChunkMetadata;
-use crate::file::metadata::statistics::Statistics;
-use crate::utils::read_write_io_utils::Binary;
 use crate::write::chunk::ChunkWriter;
 use crate::write::record::{DataPointValue, TSRecord};
 use crate::write::schema::{MeasurementSchema, Schema};
@@ -87,7 +84,7 @@ impl TsFileWriter {
                 )));
             }
         }
-        self.schema.register_timeseries(device_id, schema);
+        self.schema.register_timeseries(device_id, schema)?;
         Ok(())
     }
 
@@ -98,6 +95,7 @@ impl TsFileWriter {
     /// - A measurement is not registered for the device.
     /// - Data is out of order (when `is_unseq` is false).
     pub fn write(&mut self, record: TSRecord) -> TsFileResult<bool> {
+        record.validate()?;
         let device_id = record.device_id.clone();
         let timestamp = record.timestamp;
 

@@ -5,10 +5,10 @@
 
 use std::io::{Read, Write};
 
-use crate::common::enums::{CompressionType, TSDataType, TSEncoding};
+use crate::common::enums::TSDataType;
 use crate::error::TsFileResult;
 use crate::file::metadata::statistics::Statistics;
-use crate::utils::{ReadWriteForEncodingUtils, ReadWriteIOUtils};
+use crate::utils::ReadWriteIOUtils;
 
 /// Metadata about a single chunk.
 ///

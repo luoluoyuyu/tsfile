@@ -93,7 +93,9 @@ impl TsFileReader {
     pub fn get_all_devices(&mut self) -> TsFileResult<Vec<String>> {
         self.load_cache()?;
         let cache = self.cache.as_ref().unwrap();
-        Ok(cache.keys().cloned().collect())
+        let mut devices: Vec<String> = cache.keys().cloned().collect();
+        devices.sort();
+        Ok(devices)
     }
 
     /// Get all measurement IDs for a device.
@@ -103,10 +105,33 @@ impl TsFileReader {
     ) -> TsFileResult<Vec<String>> {
         self.load_cache()?;
         let cache = self.cache.as_ref().unwrap();
-        Ok(cache
+        let mut measurements: Vec<String> = cache
             .get(device_id)
             .map(|d| d.keys().cloned().collect())
-            .unwrap_or_default())
+            .unwrap_or_default();
+        measurements.sort();
+        Ok(measurements)
+    }
+
+    /// Check whether a device exists in the file.
+    pub fn contains_device(&mut self, device_id: &str) -> TsFileResult<bool> {
+        self.load_cache()?;
+        Ok(self.cache.as_ref().unwrap().contains_key(device_id))
+    }
+
+    /// Check whether a specific timeseries exists in the file.
+    pub fn contains_timeseries(
+        &mut self,
+        device_id: &str,
+        measurement_id: &str,
+    ) -> TsFileResult<bool> {
+        self.load_cache()?;
+        Ok(self
+            .cache
+            .as_ref()
+            .unwrap()
+            .get(device_id)
+            .is_some_and(|device| device.contains_key(measurement_id)))
     }
 
     /// Read all data in the file.

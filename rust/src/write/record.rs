@@ -4,6 +4,7 @@
 //! TSRecord and DataPoint - the write records.
 
 use crate::common::enums::TSDataType;
+use crate::error::{TsFileError, TsFileResult};
 use crate::utils::read_write_io_utils::Binary;
 
 /// A single data point (measurement + value).
@@ -70,6 +71,17 @@ impl DataPoint {
         }
     }
 
+    pub fn new_string(measurement_id: String, value: String) -> Self {
+        DataPoint::new_text(measurement_id, Binary::from_str(&value))
+    }
+
+    pub fn new_null(measurement_id: String) -> Self {
+        DataPoint {
+            measurement_id,
+            value: DataPointValue::Null,
+        }
+    }
+
     pub fn data_type(&self) -> TSDataType {
         match &self.value {
             DataPointValue::Boolean(_) => TSDataType::Boolean,
@@ -80,6 +92,15 @@ impl DataPoint {
             DataPointValue::Text(_) => TSDataType::Text,
             DataPointValue::Null => TSDataType::NullType,
         }
+    }
+
+    pub fn validate(&self) -> TsFileResult<()> {
+        if self.measurement_id.is_empty() {
+            return Err(TsFileError::WriteError(
+                "Measurement id must not be empty".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -107,5 +128,21 @@ impl TSRecord {
 
     pub fn add_tuple(&mut self, data_point: DataPoint) {
         self.data_points.push(data_point);
+    }
+
+    pub fn add_data_point(&mut self, data_point: DataPoint) {
+        self.add_tuple(data_point);
+    }
+
+    pub fn validate(&self) -> TsFileResult<()> {
+        if self.device_id.is_empty() {
+            return Err(TsFileError::WriteError(
+                "Device id must not be empty".to_string(),
+            ));
+        }
+        for data_point in &self.data_points {
+            data_point.validate()?;
+        }
+        Ok(())
     }
 }

@@ -63,6 +63,52 @@ impl MetadataIndexNode {
         self.children.push(entry);
     }
 
+    pub fn is_device_level(&self) -> bool {
+        matches!(
+            self.node_type,
+            MetadataIndexNodeType::InternalDevice | MetadataIndexNodeType::LeafDevice
+        )
+    }
+
+    pub fn is_full(&self, max_degree: usize) -> bool {
+        self.children.len() >= max_degree
+    }
+
+    pub fn child_index_entry(
+        &self,
+        key: &str,
+        exact_search: bool,
+    ) -> Option<(&MetadataIndexEntry, i64)> {
+        let index = self.binary_search_in_children(key, exact_search)?;
+        let child_end_offset = self
+            .children
+            .get(index + 1)
+            .map_or(self.end_offset, |next| next.offset);
+        Some((&self.children[index], child_end_offset))
+    }
+
+    fn binary_search_in_children(&self, key: &str, exact_search: bool) -> Option<usize> {
+        let mut low = 0usize;
+        let mut high = self.children.len();
+
+        while low < high {
+            let mid = (low + high) / 2;
+            match self.children[mid].name.as_str().cmp(key) {
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Greater => high = mid,
+                std::cmp::Ordering::Equal => return Some(mid),
+            }
+        }
+
+        if exact_search {
+            None
+        } else if low == 0 {
+            (!self.children.is_empty()).then_some(0)
+        } else {
+            Some(low - 1)
+        }
+    }
+
     pub fn serialize<W: Write>(&self, writer: &mut W) -> TsFileResult<usize> {
         let mut written = 0;
         written +=

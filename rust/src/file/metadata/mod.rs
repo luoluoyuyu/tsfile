@@ -7,10 +7,12 @@ pub mod statistics;
 pub mod chunk_metadata;
 pub mod timeseries_metadata;
 pub mod metadata_index_node;
+pub mod table_schema;
 pub mod tsfile_metadata;
 
 pub use statistics::Statistics;
 pub use chunk_metadata::{ChunkMetadata, ChunkGroupMetadata};
 pub use timeseries_metadata::TimeseriesMetadata;
 pub use metadata_index_node::{MetadataIndexNode, MetadataIndexEntry};
+pub use table_schema::{ColumnCategory, ColumnSchema, TableSchema};
 pub use tsfile_metadata::TsFileMetadata;

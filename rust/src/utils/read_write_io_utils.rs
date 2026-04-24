@@ -7,7 +7,7 @@
 
 use std::io::{Read, Write};
 
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::common::enums::{CompressionType, TSDataType, TSEncoding};
 use crate::error::{TsFileError, TsFileResult};

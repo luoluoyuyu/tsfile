@@ -12,7 +12,6 @@ use crate::error::TsFileResult;
 use crate::file::header::PageHeader;
 use crate::file::metadata::statistics::Statistics;
 use crate::utils::read_write_io_utils::Binary;
-use crate::utils::ReadWriteForEncodingUtils;
 
 /// A page buffer under construction.
 struct PageWriter {
@@ -165,8 +164,6 @@ pub struct ChunkWriter {
     num_pages: u32,
     /// Chunk-level statistics.
     chunk_statistics: Statistics,
-    /// Max points per page.
-    max_points_per_page: usize,
     /// Page size threshold in bytes.
     page_size_threshold: usize,
 }
@@ -190,7 +187,6 @@ impl ChunkWriter {
             page_buffer: Vec::new(),
             num_pages: 0,
             chunk_statistics: Statistics::new(data_type),
-            max_points_per_page: max_points,
             page_size_threshold,
         }
     }

@@ -16,10 +16,9 @@ use crate::encoding::decoder::create_decoder;
 use crate::error::{TsFileError, TsFileResult};
 use crate::file::header::{ChunkGroupHeader, ChunkHeader, PageHeader};
 use crate::file::meta_marker::MetaMarker;
-use crate::file::metadata::chunk_metadata::ChunkMetadata;
 use crate::file::metadata::tsfile_metadata::TsFileMetadata;
 use crate::read::time_value_pair::{TimeValue, TimeValuePair};
-use crate::utils::{ReadWriteForEncodingUtils, ReadWriteIOUtils};
+use crate::utils::ReadWriteIOUtils;
 
 /// Information about a chunk during sequential reading.
 #[derive(Debug, Clone)]

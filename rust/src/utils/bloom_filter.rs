@@ -3,7 +3,7 @@
 
 //! Bloom filter implementation, mirroring Java's BloomFilter.
 
-use crate::error::{TsFileError, TsFileResult};
+use crate::error::TsFileResult;
 use crate::utils::ReadWriteForEncodingUtils;
 use std::io::{Read, Write};
 
@@ -16,7 +16,7 @@ pub struct BloomFilter {
 }
 
 impl BloomFilter {
-    /// Create an empty BloomFilter (placeholder).
+    /// Create a BloomFilter for the expected item count and error rate.
     pub fn new(error_rate: f64, max_items: usize) -> Self {
         let m = Self::compute_m(error_rate, max_items);
         let k = Self::compute_k(error_rate);
@@ -31,9 +31,9 @@ impl BloomFilter {
     /// Create an empty BloomFilter for cases where no paths are tracked.
     pub fn empty() -> Self {
         BloomFilter {
-            bit_set: vec![0u8],
-            size: 8,
-            hash_function_size: 1,
+            bit_set: Vec::new(),
+            size: 0,
+            hash_function_size: 0,
         }
     }
 
@@ -63,6 +63,9 @@ impl BloomFilter {
 
     /// Test if a path might be in the set.
     pub fn contains(&self, path: &str) -> bool {
+        if self.bit_set.is_empty() || self.size == 0 || self.hash_function_size == 0 {
+            return false;
+        }
         let hash = Self::murmur_hash(path.as_bytes(), 0);
         let hash2 = Self::murmur_hash(path.as_bytes(), hash as u32);
         for i in 0..self.hash_function_size {
@@ -77,6 +80,10 @@ impl BloomFilter {
         true
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.bit_set.is_empty() || self.size == 0 || self.hash_function_size == 0
+    }
+
     /// Serialize to writer.
     pub fn serialize<W: Write>(&self, writer: &mut W) -> TsFileResult<usize> {
         let mut written = 0;
@@ -84,10 +91,18 @@ impl BloomFilter {
             self.bit_set.len() as u32,
             writer,
         )?;
-        writer.write_all(&self.bit_set)?;
-        written += self.bit_set.len();
-        written +=
-            ReadWriteForEncodingUtils::write_unsigned_var_int(self.hash_function_size, writer)?;
+        if !self.bit_set.is_empty() {
+            writer.write_all(&self.bit_set)?;
+            written += self.bit_set.len();
+            written += ReadWriteForEncodingUtils::write_unsigned_var_int(
+                self.size as u32,
+                writer,
+            )?;
+            written += ReadWriteForEncodingUtils::write_unsigned_var_int(
+                self.hash_function_size,
+                writer,
+            )?;
+        }
         Ok(written)
     }
 
@@ -122,9 +137,9 @@ impl BloomFilter {
         }
         let mut bit_set = vec![0u8; byte_len];
         reader.read_exact(&mut bit_set)?;
+        let size = ReadWriteForEncodingUtils::read_unsigned_var_int(reader)? as usize;
         let hash_function_size =
             ReadWriteForEncodingUtils::read_unsigned_var_int(reader)?;
-        let size = byte_len * 8;
         Ok(BloomFilter {
             bit_set,
             size,
