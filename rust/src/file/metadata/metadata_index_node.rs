@@ -7,6 +7,7 @@ use std::io::{Read, Write};
 
 use crate::common::enums::MetadataIndexNodeType;
 use crate::error::TsFileResult;
+use crate::file::metadata::device_id::DeviceId;
 use crate::utils::{ReadWriteForEncodingUtils, ReadWriteIOUtils};
 
 /// A single entry in a MetadataIndexNode.
@@ -17,6 +18,28 @@ pub struct MetadataIndexEntry {
     /// Offset in the TsFile.
     pub offset: i64,
 }
+
+/// Device-level metadata index entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceMetadataIndexEntry {
+    pub device_id: DeviceId,
+    pub offset: i64,
+}
+
+impl DeviceMetadataIndexEntry {
+    pub fn new(device_id: DeviceId, offset: i64) -> Self {
+        DeviceMetadataIndexEntry { device_id, offset }
+    }
+
+    pub fn serialize<W: Write>(&self, writer: &mut W) -> TsFileResult<usize> {
+        let mut written = self.device_id.serialize(writer)?;
+        written += ReadWriteIOUtils::write_i64(self.offset, writer)?;
+        Ok(written)
+    }
+}
+
+/// Measurement-level metadata index entry.
+pub type MeasurementMetadataIndexEntry = MetadataIndexEntry;
 
 impl MetadataIndexEntry {
     pub fn new(name: String, offset: i64) -> Self {

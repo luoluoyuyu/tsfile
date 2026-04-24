@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 use crate::common::enums::TSDataType;
 use crate::error::TsFileResult;
 use crate::file::metadata::statistics::Statistics;
+use crate::file::metadata::traits::{ChunkMetadataView, Metadata};
 use crate::utils::ReadWriteIOUtils;
 
 /// Metadata about a single chunk.
@@ -74,6 +75,26 @@ impl ChunkMetadata {
             deleted: false,
             mask: 0,
         })
+    }
+}
+
+impl Metadata for ChunkMetadata {
+    fn time_statistics(&self) -> Option<&Statistics> {
+        Some(&self.statistics)
+    }
+}
+
+impl ChunkMetadataView for ChunkMetadata {
+    fn measurement_uid(&self) -> &str {
+        &self.measurement_uid
+    }
+
+    fn data_type(&self) -> TSDataType {
+        self.data_type
+    }
+
+    fn offset_of_chunk_header(&self) -> i64 {
+        self.offset_of_chunk_header
     }
 }
 

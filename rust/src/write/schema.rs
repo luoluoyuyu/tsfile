@@ -119,6 +119,78 @@ impl MeasurementSchema {
     }
 }
 
+/// Fluent builder matching Java's `MeasurementSchemaBuilder`.
+#[derive(Debug, Clone)]
+pub struct MeasurementSchemaBuilder {
+    measurement_id: String,
+    data_type: TSDataType,
+    encoding: TSEncoding,
+    compression: CompressionType,
+    props: HashMap<String, String>,
+}
+
+impl MeasurementSchemaBuilder {
+    pub fn new(measurement_id: String, data_type: TSDataType) -> TsFileResult<Self> {
+        if measurement_id.trim().is_empty() {
+            return Err(TsFileError::SchemaError(
+                "Measurement name cannot be empty".to_string(),
+            ));
+        }
+        Ok(MeasurementSchemaBuilder {
+            measurement_id,
+            data_type,
+            encoding: default_encoding(data_type),
+            compression: CompressionType::Lz4,
+            props: HashMap::new(),
+        })
+    }
+
+    pub fn with_encoding(mut self, encoding: TSEncoding) -> Self {
+        self.encoding = encoding;
+        self
+    }
+
+    pub fn with_compression(mut self, compression: CompressionType) -> Self {
+        self.compression = compression;
+        self
+    }
+
+    pub fn with_property(mut self, key: String, value: String) -> Self {
+        self.props.insert(key, value);
+        self
+    }
+
+    pub fn with_properties(mut self, props: HashMap<String, String>) -> Self {
+        self.props = props;
+        self
+    }
+
+    pub fn build(self) -> TsFileResult<MeasurementSchema> {
+        let schema = MeasurementSchema::with_props(
+            self.measurement_id,
+            self.data_type,
+            self.encoding,
+            self.compression,
+            self.props,
+        );
+        schema.validate()?;
+        Ok(schema)
+    }
+}
+
+fn default_encoding(data_type: TSDataType) -> TSEncoding {
+    match data_type {
+        TSDataType::Boolean | TSDataType::Text | TSDataType::Blob | TSDataType::String => {
+            TSEncoding::Plain
+        }
+        TSDataType::Float | TSDataType::Double => TSEncoding::Gorilla,
+        TSDataType::Int32 | TSDataType::Int64 | TSDataType::Timestamp | TSDataType::Date => {
+            TSEncoding::Ts2diff
+        }
+        _ => TSEncoding::Plain,
+    }
+}
+
 /// Schema for a device (collection of measurements).
 ///
 /// Mirrors Java's Schema.

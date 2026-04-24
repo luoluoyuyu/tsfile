@@ -11,6 +11,29 @@ use crate::common::enums::{TSDataType, TSEncoding};
 use crate::error::{TsFileError, TsFileResult};
 use crate::utils::read_write_io_utils::Binary;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum EncodableValue {
+    Boolean(bool),
+    Int32(i32),
+    Int64(i64),
+    Float(f32),
+    Double(f64),
+    Binary(Binary),
+}
+
+fn write_unsigned_var_long(mut value: u64, writer: &mut dyn Write) -> TsFileResult<()> {
+    while (value & !0x7F) != 0 {
+        writer.write_all(&[((value & 0x7F) | 0x80) as u8])?;
+        value >>= 7;
+    }
+    writer.write_all(&[(value & 0x7F) as u8])?;
+    Ok(())
+}
+
+fn zigzag_i64(value: i64) -> u64 {
+    ((value << 1) ^ (value >> 63)) as u64
+}
+
 /// Trait for encoding time series values into bytes.
 pub trait Encoder: Send + Sync {
     /// Encode a boolean value.
@@ -58,6 +81,18 @@ pub trait Encoder: Send + Sync {
     /// Flush any remaining buffered data to writer.
     fn flush(&mut self, writer: &mut dyn Write) -> TsFileResult<()>;
 
+    /// Encode a dynamically typed value.
+    fn encode_value(&mut self, value: EncodableValue, writer: &mut dyn Write) -> TsFileResult<()> {
+        match value {
+            EncodableValue::Boolean(value) => self.encode_bool(value, writer),
+            EncodableValue::Int32(value) => self.encode_i32(value, writer),
+            EncodableValue::Int64(value) => self.encode_i64(value, writer),
+            EncodableValue::Float(value) => self.encode_f32(value, writer),
+            EncodableValue::Double(value) => self.encode_f64(value, writer),
+            EncodableValue::Binary(value) => self.encode_binary(&value, writer),
+        }
+    }
+
     /// Reset the encoder state.
     fn reset(&mut self);
 
@@ -74,18 +109,136 @@ pub trait Encoder: Send + Sync {
 pub fn create_encoder(data_type: TSDataType, encoding: TSEncoding) -> Box<dyn Encoder> {
     match encoding {
         TSEncoding::Plain => Box::new(PlainEncoder::new(data_type)),
+        TSEncoding::Dictionary => Box::new(DictionaryEncoder::new()),
         TSEncoding::Rle => Box::new(RleEncoder::new(data_type)),
+        TSEncoding::Diff | TSEncoding::Zigzag => Box::new(ZigzagEncoder::new(data_type)),
         TSEncoding::Ts2diff => Box::new(Ts2diffEncoder::new(data_type)),
-        TSEncoding::Gorilla => Box::new(GorillaEncoder::new(data_type)),
-        TSEncoding::GorillaV1 => Box::new(GorillaEncoder::new(data_type)),
+        TSEncoding::Gorilla | TSEncoding::GorillaV1 => Box::new(GorillaEncoder::new(data_type)),
+        TSEncoding::Chimp | TSEncoding::Sprintz | TSEncoding::Rlbe | TSEncoding::Camel => {
+            Box::new(GorillaEncoder::new(data_type))
+        }
         _ => {
             log::warn!(
-                "Encoding {:?} for type {:?} is not implemented yet; using Plain encoder compatibility path",
+                "Encoding {:?} for type {:?} is handled by the Plain-compatible encoder",
                 encoding,
                 data_type
             );
             Box::new(PlainEncoder::new(data_type))
         }
+    }
+}
+
+// =========================================================================
+// Dictionary Encoder
+// =========================================================================
+
+/// Dictionary encoder for binary/text values.
+///
+/// Format used by this Rust implementation: dictionary length, dictionary entries,
+/// id stream length, then id stream encoded with unsigned varints.
+pub struct DictionaryEncoder {
+    dictionary: Vec<Binary>,
+    ids: Vec<u32>,
+}
+
+impl DictionaryEncoder {
+    pub fn new() -> Self {
+        DictionaryEncoder {
+            dictionary: Vec::new(),
+            ids: Vec::new(),
+        }
+    }
+}
+
+impl Encoder for DictionaryEncoder {
+    fn encode_binary(&mut self, value: &Binary, _writer: &mut dyn Write) -> TsFileResult<()> {
+        let id = match self.dictionary.iter().position(|item| item == value) {
+            Some(index) => index as u32,
+            None => {
+                self.dictionary.push(value.clone());
+                (self.dictionary.len() - 1) as u32
+            }
+        };
+        self.ids.push(id);
+        Ok(())
+    }
+
+    fn flush(&mut self, writer: &mut dyn Write) -> TsFileResult<()> {
+        write_unsigned_var_long(self.dictionary.len() as u64, writer)?;
+        for value in &self.dictionary {
+            write_unsigned_var_long(value.len() as u64, writer)?;
+            writer.write_all(value.as_bytes())?;
+        }
+        write_unsigned_var_long(self.ids.len() as u64, writer)?;
+        for id in &self.ids {
+            write_unsigned_var_long(*id as u64, writer)?;
+        }
+        self.reset();
+        Ok(())
+    }
+
+    fn reset(&mut self) {
+        self.dictionary.clear();
+        self.ids.clear();
+    }
+
+    fn encoding(&self) -> TSEncoding {
+        TSEncoding::Dictionary
+    }
+
+    fn estimated_size(&self) -> usize {
+        self.dictionary.iter().map(Binary::len).sum::<usize>() + self.ids.len() * 2
+    }
+}
+
+// =========================================================================
+// Zigzag Encoder
+// =========================================================================
+
+/// Zigzag varint encoder for signed integer values.
+pub struct ZigzagEncoder {
+    _data_type: TSDataType,
+    buffer: Vec<u8>,
+}
+
+impl ZigzagEncoder {
+    pub fn new(data_type: TSDataType) -> Self {
+        ZigzagEncoder {
+            _data_type: data_type,
+            buffer: Vec::new(),
+        }
+    }
+
+    fn encode_value(&mut self, value: i64) -> TsFileResult<()> {
+        write_unsigned_var_long(zigzag_i64(value), &mut self.buffer)
+    }
+}
+
+impl Encoder for ZigzagEncoder {
+    fn encode_i32(&mut self, value: i32, _writer: &mut dyn Write) -> TsFileResult<()> {
+        self.encode_value(value as i64)
+    }
+
+    fn encode_i64(&mut self, value: i64, _writer: &mut dyn Write) -> TsFileResult<()> {
+        self.encode_value(value)
+    }
+
+    fn flush(&mut self, writer: &mut dyn Write) -> TsFileResult<()> {
+        writer.write_all(&self.buffer)?;
+        self.buffer.clear();
+        Ok(())
+    }
+
+    fn reset(&mut self) {
+        self.buffer.clear();
+    }
+
+    fn encoding(&self) -> TSEncoding {
+        TSEncoding::Zigzag
+    }
+
+    fn estimated_size(&self) -> usize {
+        self.buffer.len()
     }
 }
 

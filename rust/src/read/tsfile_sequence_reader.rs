@@ -11,14 +11,12 @@ use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::common::constant::TsFileConstant;
-use crate::compress::create_decompressor;
-use crate::encoding::decoder::create_decoder;
 use crate::error::{TsFileError, TsFileResult};
-use crate::file::header::{ChunkGroupHeader, ChunkHeader, PageHeader};
+use crate::file::header::{ChunkGroupHeader, ChunkHeader};
 use crate::file::meta_marker::MetaMarker;
 use crate::file::metadata::tsfile_metadata::TsFileMetadata;
-use crate::read::time_value_pair::{TimeValue, TimeValuePair};
-use crate::utils::ReadWriteIOUtils;
+use crate::read::reader::ChunkReader;
+use crate::read::time_value_pair::TimeValuePair;
 
 /// Information about a chunk during sequential reading.
 #[derive(Debug, Clone)]
@@ -173,86 +171,46 @@ impl TsFileSequenceReader {
         Ok(results)
     }
 
+    /// Read all chunks as structured `ChunkInfo` records.
+    pub fn read_chunk_infos(&mut self) -> TsFileResult<Vec<ChunkInfo>> {
+        Ok(self
+            .read_all_chunks()?
+            .into_iter()
+            .map(|(device_id, chunk_header, chunk_data)| ChunkInfo {
+                device_id,
+                chunk_header,
+                chunk_data,
+            })
+            .collect())
+    }
+
+    /// Read and decode all points, organized as device -> measurement -> points.
+    pub fn read_all_data(&mut self) -> TsFileResult<DeviceChunkMap> {
+        let mut data_map: DeviceChunkMap = HashMap::new();
+        for chunk_info in self.read_chunk_infos()? {
+            let measurement_id = chunk_info.chunk_header.measurement_id.clone();
+            let points = Self::read_chunk_data(&chunk_info.chunk_header, &chunk_info.chunk_data)?;
+            data_map
+                .entry(chunk_info.device_id)
+                .or_default()
+                .entry(measurement_id)
+                .or_default()
+                .extend(points);
+        }
+        for measurement_map in data_map.values_mut() {
+            for points in measurement_map.values_mut() {
+                points.sort_by_key(|point| point.timestamp);
+            }
+        }
+        Ok(data_map)
+    }
+
     /// Read all time-value pairs from a chunk.
     pub fn read_chunk_data(
         chunk_header: &ChunkHeader,
         chunk_data: &[u8],
     ) -> TsFileResult<Vec<TimeValuePair>> {
-        let has_multiple_pages = (chunk_header.chunk_type & 0x3F) == MetaMarker::CHUNK_HEADER;
-        // Java's convention: only multi-page chunks include statistics in page headers.
-        // Single-page chunks do NOT include page-level statistics.
-        let has_page_statistics = has_multiple_pages;
-        let decompressor = create_decompressor(chunk_header.compression_type);
-        let mut cursor = std::io::Cursor::new(chunk_data);
-        let mut results = Vec::new();
-
-        while (cursor.position() as usize) < chunk_data.len() {
-            // Read page header
-            let page_header = PageHeader::deserialize(
-                &mut cursor,
-                chunk_header.data_type,
-                has_page_statistics,
-            )?;
-
-            if page_header.uncompressed_size == 0 {
-                continue;
-            }
-
-            let compressed_size = page_header.compressed_size as usize;
-            let uncompressed_size = page_header.uncompressed_size as usize;
-            let mut compressed = vec![0u8; compressed_size];
-            cursor.read_exact(&mut compressed)?;
-
-            // Decompress
-            let page_data = decompressor.decompress(&compressed, uncompressed_size)?;
-
-            // Decode time and value
-            let mut page_cursor = std::io::Cursor::new(&page_data);
-            let time_len = ReadWriteIOUtils::read_i32(&mut page_cursor)? as usize;
-            let time_data_start = page_cursor.position() as usize;
-            let time_data = &page_data[time_data_start..time_data_start + time_len];
-            let value_data = &page_data[time_data_start + time_len..];
-
-            let mut time_decoder =
-                create_decoder(crate::common::enums::TSDataType::Int64, crate::common::enums::TSEncoding::Ts2diff);
-            let mut value_decoder =
-                create_decoder(chunk_header.data_type, chunk_header.encoding_type);
-
-            time_decoder.init(time_data)?;
-            value_decoder.init(value_data)?;
-
-            while time_decoder.has_next() && value_decoder.has_next() {
-                let ts = time_decoder.read_i64()?;
-                let value = match chunk_header.data_type {
-                    crate::common::enums::TSDataType::Boolean => {
-                        TimeValue::Boolean(value_decoder.read_bool()?)
-                    }
-                    crate::common::enums::TSDataType::Int32
-                    | crate::common::enums::TSDataType::Date => {
-                        TimeValue::Int32(value_decoder.read_i32()?)
-                    }
-                    crate::common::enums::TSDataType::Int64
-                    | crate::common::enums::TSDataType::Timestamp => {
-                        TimeValue::Int64(value_decoder.read_i64()?)
-                    }
-                    crate::common::enums::TSDataType::Float => {
-                        TimeValue::Float(value_decoder.read_f32()?)
-                    }
-                    crate::common::enums::TSDataType::Double => {
-                        TimeValue::Double(value_decoder.read_f64()?)
-                    }
-                    crate::common::enums::TSDataType::Text
-                    | crate::common::enums::TSDataType::Blob
-                    | crate::common::enums::TSDataType::String => {
-                        TimeValue::Text(value_decoder.read_binary()?)
-                    }
-                    _ => TimeValue::Null,
-                };
-                results.push(TimeValuePair::new(ts, value));
-            }
-        }
-
-        Ok(results)
+        ChunkReader::new(chunk_header.clone(), chunk_data.to_vec()).read_all()
     }
 }
 

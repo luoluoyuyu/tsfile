@@ -7,139 +7,16 @@ use std::io::Write;
 
 use crate::common::enums::{CompressionType, TSDataType, TSEncoding};
 use crate::compress::{create_compressor, Compressor};
-use crate::encoding::encoder::{create_encoder, Encoder};
 use crate::error::TsFileResult;
 use crate::file::header::PageHeader;
 use crate::file::metadata::statistics::Statistics;
+use crate::write::chunk::page_writer::PageWriter;
 use crate::utils::read_write_io_utils::Binary;
 
-/// A page buffer under construction.
-struct PageWriter {
-    /// The encoded time data.
-    time_buffer: Vec<u8>,
-    /// The encoded value data.
-    value_buffer: Vec<u8>,
-    /// Time encoder.
-    time_encoder: Box<dyn Encoder>,
-    /// Value encoder.
-    value_encoder: Box<dyn Encoder>,
-    /// Statistics for this page.
+struct BufferedPage {
+    uncompressed_size: u32,
+    compressed_bytes: Vec<u8>,
     statistics: Statistics,
-    /// Number of data points in this page.
-    point_count: usize,
-    /// Max number of points per page.
-    max_points: usize,
-}
-
-impl PageWriter {
-    pub fn new(data_type: TSDataType, encoding: TSEncoding, max_points: usize) -> Self {
-        PageWriter {
-            time_buffer: Vec::new(),
-            value_buffer: Vec::new(),
-            time_encoder: create_encoder(TSDataType::Int64, TSEncoding::Ts2diff),
-            value_encoder: create_encoder(data_type, encoding),
-            statistics: Statistics::new(data_type),
-            point_count: 0,
-            max_points,
-        }
-    }
-
-    pub fn is_full(&self) -> bool {
-        self.point_count >= self.max_points
-    }
-
-    pub fn point_count(&self) -> usize {
-        self.point_count
-    }
-
-    pub fn write_bool(&mut self, timestamp: i64, value: bool) -> TsFileResult<()> {
-        self.time_encoder
-            .encode_i64(timestamp, &mut self.time_buffer)?;
-        self.value_encoder
-            .encode_bool(value, &mut self.value_buffer)?;
-        self.statistics.update_bool(timestamp, value);
-        self.point_count += 1;
-        Ok(())
-    }
-
-    pub fn write_i32(&mut self, timestamp: i64, value: i32) -> TsFileResult<()> {
-        self.time_encoder
-            .encode_i64(timestamp, &mut self.time_buffer)?;
-        self.value_encoder
-            .encode_i32(value, &mut self.value_buffer)?;
-        self.statistics.update_i32(timestamp, value);
-        self.point_count += 1;
-        Ok(())
-    }
-
-    pub fn write_i64(&mut self, timestamp: i64, value: i64) -> TsFileResult<()> {
-        self.time_encoder
-            .encode_i64(timestamp, &mut self.time_buffer)?;
-        self.value_encoder
-            .encode_i64(value, &mut self.value_buffer)?;
-        self.statistics.update_i64(timestamp, value);
-        self.point_count += 1;
-        Ok(())
-    }
-
-    pub fn write_f32(&mut self, timestamp: i64, value: f32) -> TsFileResult<()> {
-        self.time_encoder
-            .encode_i64(timestamp, &mut self.time_buffer)?;
-        self.value_encoder
-            .encode_f32(value, &mut self.value_buffer)?;
-        self.statistics.update_f32(timestamp, value);
-        self.point_count += 1;
-        Ok(())
-    }
-
-    pub fn write_f64(&mut self, timestamp: i64, value: f64) -> TsFileResult<()> {
-        self.time_encoder
-            .encode_i64(timestamp, &mut self.time_buffer)?;
-        self.value_encoder
-            .encode_f64(value, &mut self.value_buffer)?;
-        self.statistics.update_f64(timestamp, value);
-        self.point_count += 1;
-        Ok(())
-    }
-
-    pub fn write_binary(&mut self, timestamp: i64, value: Binary) -> TsFileResult<()> {
-        self.time_encoder
-            .encode_i64(timestamp, &mut self.time_buffer)?;
-        self.value_encoder
-            .encode_binary(&value, &mut self.value_buffer)?;
-        self.statistics.update_binary(timestamp, value);
-        self.point_count += 1;
-        Ok(())
-    }
-
-    /// Flush all buffered data into the page byte buffer.
-    /// Returns (uncompressed_bytes, statistics).
-    pub fn flush_to_page_bytes(&mut self) -> TsFileResult<(Vec<u8>, Statistics)> {
-        self.time_encoder.flush(&mut self.time_buffer)?;
-        self.value_encoder.flush(&mut self.value_buffer)?;
-
-        let mut page_bytes = Vec::new();
-        // Write time data length as u32 big-endian, then time data
-        let time_len = self.time_buffer.len() as u32;
-        page_bytes.extend_from_slice(&time_len.to_be_bytes());
-        page_bytes.extend_from_slice(&self.time_buffer);
-        // Write value data
-        page_bytes.extend_from_slice(&self.value_buffer);
-
-        let data_type = self.statistics.typed.data_type();
-        let stats = std::mem::replace(
-            &mut self.statistics,
-            Statistics::new(data_type),
-        );
-
-        self.time_buffer.clear();
-        self.value_buffer.clear();
-        self.point_count = 0;
-        self.time_encoder.reset();
-        self.value_encoder.reset();
-
-        Ok((page_bytes, stats))
-    }
 }
 
 /// ChunkWriter: manages writing pages and producing a chunk.
@@ -158,8 +35,9 @@ pub struct ChunkWriter {
     compressor: Box<dyn Compressor>,
     /// Current page writer.
     page_writer: PageWriter,
-    /// All compressed pages collected so far (header + data).
-    page_buffer: Vec<u8>,
+    /// All compressed pages collected so far. Page headers are materialized at chunk flush time
+    /// because Java writes page statistics iff the final chunk has more than one page.
+    pages: Vec<BufferedPage>,
     /// Number of pages flushed.
     num_pages: u32,
     /// Chunk-level statistics.
@@ -184,7 +62,7 @@ impl ChunkWriter {
             compression,
             compressor: create_compressor(compression),
             page_writer: PageWriter::new(data_type, encoding, max_points),
-            page_buffer: Vec::new(),
+            pages: Vec::new(),
             num_pages: 0,
             chunk_statistics: Statistics::new(data_type),
             page_size_threshold,
@@ -229,8 +107,7 @@ impl ChunkWriter {
 
     fn check_page_size_and_may_flush(&mut self) -> TsFileResult<()> {
         if self.page_writer.is_full()
-            || self.page_writer.time_buffer.len() + self.page_writer.value_buffer.len()
-                >= self.page_size_threshold
+            || self.page_writer.estimated_size() >= self.page_size_threshold
         {
             self.flush_current_page()?;
         }
@@ -241,27 +118,18 @@ impl ChunkWriter {
         if self.page_writer.point_count() == 0 {
             return Ok(());
         }
-        let (uncompressed_bytes, page_stats) = self.page_writer.flush_to_page_bytes()?;
+        let Some(encoded_page) = self.page_writer.flush()? else {
+            return Ok(());
+        };
+        let uncompressed_bytes = encoded_page.data;
+        let page_stats = encoded_page.statistics;
         let uncompressed_size = uncompressed_bytes.len() as u32;
         let compressed_bytes = self.compressor.compress(&uncompressed_bytes)?;
-        let compressed_size = compressed_bytes.len() as u32;
-
-        // Match Java's convention:
-        // - If this is the only page in the chunk (num_pages == 0 before this flush),
-        //   the page header does NOT include statistics.
-        // - If this is a multi-page chunk, page headers include statistics.
-        let has_statistics = self.num_pages > 0;
-        let page_header = PageHeader::new(
+        self.pages.push(BufferedPage {
             uncompressed_size,
-            compressed_size,
-            if has_statistics {
-                Some(page_stats.clone())
-            } else {
-                None
-            },
-        );
-        page_header.serialize(&mut self.page_buffer)?;
-        self.page_buffer.extend_from_slice(&compressed_bytes);
+            compressed_bytes,
+            statistics: page_stats.clone(),
+        });
 
         self.chunk_statistics.merge(&page_stats);
         self.num_pages += 1;
@@ -277,7 +145,23 @@ impl ChunkWriter {
         // Flush remaining data in the current page
         self.flush_current_page()?;
 
-        let data_size = self.page_buffer.len() as u32;
+        let has_page_statistics = self.num_pages > 1;
+        let mut chunk_data = Vec::new();
+        for page in &self.pages {
+            let page_header = PageHeader::new(
+                page.uncompressed_size,
+                page.compressed_bytes.len() as u32,
+                if has_page_statistics {
+                    Some(page.statistics.clone())
+                } else {
+                    None
+                },
+            );
+            page_header.serialize(&mut chunk_data)?;
+            chunk_data.extend_from_slice(&page.compressed_bytes);
+        }
+
+        let data_size = chunk_data.len() as u32;
 
         // Write chunk header
         use crate::file::header::ChunkHeader;
@@ -296,11 +180,11 @@ impl ChunkWriter {
         writer.write_all(&header_bytes)?;
 
         // Write chunk data
-        writer.write_all(&self.page_buffer)?;
-        let data_size_usize = self.page_buffer.len();
+        writer.write_all(&chunk_data)?;
+        let data_size_usize = chunk_data.len();
 
         // Reset for next chunk
-        self.page_buffer.clear();
+        self.pages.clear();
         self.num_pages = 0;
         self.chunk_statistics = Statistics::new(self.data_type);
 
@@ -319,6 +203,6 @@ impl ChunkWriter {
 
     /// Check if there is data to write.
     pub fn has_data(&self) -> bool {
-        !self.page_buffer.is_empty() || self.page_writer.point_count() > 0
+        !self.pages.is_empty() || self.page_writer.point_count() > 0
     }
 }

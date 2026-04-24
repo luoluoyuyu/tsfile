@@ -9,6 +9,7 @@ use crate::common::enums::TSDataType;
 use crate::error::TsFileResult;
 use crate::file::metadata::chunk_metadata::ChunkMetadata;
 use crate::file::metadata::statistics::Statistics;
+use crate::file::metadata::traits::{Metadata, TimeSeriesMetadataView};
 use crate::utils::{ReadWriteForEncodingUtils, ReadWriteIOUtils};
 
 /// Metadata for a single timeseries, stored in the TsFile footer.
@@ -92,5 +93,21 @@ impl TimeseriesMetadata {
             statistics,
             chunk_metadata_list: Vec::new(),
         })
+    }
+}
+
+impl Metadata for TimeseriesMetadata {
+    fn time_statistics(&self) -> Option<&Statistics> {
+        Some(&self.statistics)
+    }
+}
+
+impl TimeSeriesMetadataView for TimeseriesMetadata {
+    fn measurement_id(&self) -> &str {
+        &self.measurement_id
+    }
+
+    fn data_type(&self) -> TSDataType {
+        self.data_type
     }
 }

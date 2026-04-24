@@ -3,6 +3,8 @@
 
 //! Chunk writing module.
 
+pub mod page_writer;
 pub mod chunk_writer;
 
 pub use chunk_writer::ChunkWriter;
+pub use page_writer::{EncodedPage, PageWriter};

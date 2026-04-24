@@ -6,5 +6,11 @@
 pub mod encoder;
 pub mod decoder;
 
-pub use encoder::{Encoder, PlainEncoder};
-pub use decoder::{Decoder, PlainDecoder};
+pub use encoder::{
+    create_encoder, DictionaryEncoder, EncodableValue, Encoder, GorillaEncoder, PlainEncoder,
+    RleEncoder, Ts2diffEncoder, ZigzagEncoder,
+};
+pub use decoder::{
+    create_decoder, read_next_value, DecodedValue, Decoder, DictionaryDecoder, GorillaDecoder,
+    PlainDecoder, RleDecoder, Ts2diffDecoder, ZigzagDecoder,
+};

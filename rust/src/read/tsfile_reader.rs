@@ -9,6 +9,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::error::TsFileResult;
+use crate::read::api::TsFileReadApi;
+use crate::read::common::{Field, RowRecord, TimeRange};
+use crate::read::reader::VecPointReader;
+use crate::read::result_set::{QueryExpression, ResultSet};
+use crate::read::time_value_pair::TimeValue;
 use crate::read::time_value_pair::TimeValuePair;
 use crate::read::tsfile_sequence_reader::TsFileSequenceReader;
 
@@ -47,30 +52,7 @@ impl TsFileReader {
             return Ok(());
         }
 
-        let mut data_map: HashMap<String, HashMap<String, Vec<TimeValuePair>>> = HashMap::new();
-        let chunks = self.sequence_reader.read_all_chunks()?;
-
-        for (device_id, chunk_header, chunk_data) in chunks {
-            let measurement_id = chunk_header.measurement_id.clone();
-            let pairs =
-                TsFileSequenceReader::read_chunk_data(&chunk_header, &chunk_data)?;
-
-            data_map
-                .entry(device_id)
-                .or_default()
-                .entry(measurement_id)
-                .or_default()
-                .extend(pairs);
-        }
-
-        // Sort all time-value pairs by timestamp
-        for device_map in data_map.values_mut() {
-            for pairs in device_map.values_mut() {
-                pairs.sort_by_key(|p| p.timestamp);
-            }
-        }
-
-        self.cache = Some(data_map);
+        self.cache = Some(self.sequence_reader.read_all_data()?);
         Ok(())
     }
 
@@ -87,6 +69,70 @@ impl TsFileReader {
             .and_then(|d| d.get(measurement_id))
             .cloned()
             .unwrap_or_default())
+    }
+
+    /// Read a timeseries restricted by a time range.
+    pub fn read_timeseries_by_time_range(
+        &mut self,
+        device_id: &str,
+        measurement_id: &str,
+        time_range: TimeRange,
+    ) -> TsFileResult<Vec<TimeValuePair>> {
+        Ok(self
+            .read_timeseries(device_id, measurement_id)?
+            .into_iter()
+            .filter(|pair| time_range.contains_time(pair.timestamp))
+            .collect())
+    }
+
+    pub fn get_point_reader(
+        &mut self,
+        device_id: &str,
+        measurement_id: &str,
+    ) -> TsFileResult<VecPointReader> {
+        Ok(VecPointReader::new(self.read_timeseries(device_id, measurement_id)?))
+    }
+
+    pub fn query(&mut self, expression: QueryExpression) -> TsFileResult<ResultSet> {
+        let mut rows = self.read_rows(&expression.device_id, &expression.measurements)?;
+        if let Some(time_range) = expression.time_range {
+            rows.retain(|row| time_range.contains_time(row.timestamp));
+        }
+        Ok(ResultSet::new(expression.measurements, rows))
+    }
+
+    /// Read rows for a device. Each returned row contains fields in the requested measurement order.
+    pub fn read_rows(
+        &mut self,
+        device_id: &str,
+        measurements: &[String],
+    ) -> TsFileResult<Vec<RowRecord>> {
+        self.load_cache()?;
+        let Some(device_map) = self.cache.as_ref().unwrap().get(device_id) else {
+            return Ok(Vec::new());
+        };
+
+        let mut timestamps: Vec<i64> = device_map
+            .values()
+            .flat_map(|pairs| pairs.iter().map(|pair| pair.timestamp))
+            .collect();
+        timestamps.sort_unstable();
+        timestamps.dedup();
+
+        let mut rows = Vec::with_capacity(timestamps.len());
+        for timestamp in timestamps {
+            let mut row = RowRecord::new(timestamp);
+            for measurement in measurements {
+                let value = device_map
+                    .get(measurement)
+                    .and_then(|pairs| pairs.iter().find(|pair| pair.timestamp == timestamp))
+                    .map(|pair| pair.value.clone())
+                    .unwrap_or(TimeValue::Null);
+                row.add_field(field_from_time_value(value));
+            }
+            rows.push(row);
+        }
+        Ok(rows)
     }
 
     /// Get all device IDs in the file.
@@ -140,5 +186,31 @@ impl TsFileReader {
     ) -> TsFileResult<&HashMap<String, HashMap<String, Vec<TimeValuePair>>>> {
         self.load_cache()?;
         Ok(self.cache.as_ref().unwrap())
+    }
+}
+
+impl TsFileReadApi for TsFileReader {
+    fn read_timeseries(
+        &mut self,
+        device_id: &str,
+        measurement_id: &str,
+    ) -> TsFileResult<Vec<TimeValuePair>> {
+        TsFileReader::read_timeseries(self, device_id, measurement_id)
+    }
+
+    fn query(&mut self, expression: QueryExpression) -> TsFileResult<ResultSet> {
+        TsFileReader::query(self, expression)
+    }
+}
+
+fn field_from_time_value(value: TimeValue) -> Field {
+    match value {
+        TimeValue::Boolean(value) => Field::boolean(value),
+        TimeValue::Int32(value) => Field::int32(value),
+        TimeValue::Int64(value) => Field::int64(value),
+        TimeValue::Float(value) => Field::float(value),
+        TimeValue::Double(value) => Field::double(value),
+        TimeValue::Text(value) => Field::text(value),
+        TimeValue::Null => Field::null(),
     }
 }

@@ -7,6 +7,31 @@ use crate::common::enums::{TSDataType, TSEncoding};
 use crate::error::{TsFileError, TsFileResult};
 use crate::utils::read_write_io_utils::Binary;
 
+fn read_unsigned_var_long(data: &[u8], pos: &mut usize) -> TsFileResult<u64> {
+    let mut value = 0u64;
+    let mut shift = 0u32;
+    loop {
+        if *pos >= data.len() {
+            return Err(TsFileError::DecodingError("VarInt truncated".to_string()));
+        }
+        let byte = data[*pos] as u64;
+        *pos += 1;
+        value |= (byte & 0x7F) << shift;
+        if (byte & 0x80) == 0 {
+            break;
+        }
+        shift += 7;
+        if shift >= 64 {
+            return Err(TsFileError::DecodingError("VarInt too large".to_string()));
+        }
+    }
+    Ok(value)
+}
+
+fn unzigzag_i64(value: u64) -> i64 {
+    ((value >> 1) as i64) ^ -((value & 1) as i64)
+}
+
 /// A decoded value from a timeseries.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecodedValue {
@@ -77,12 +102,129 @@ pub trait Decoder: Send + Sync {
 pub fn create_decoder(data_type: TSDataType, encoding: TSEncoding) -> Box<dyn Decoder> {
     match encoding {
         TSEncoding::Plain => Box::new(PlainDecoder::new(data_type)),
+        TSEncoding::Dictionary => Box::new(DictionaryDecoder::new()),
         TSEncoding::Rle => Box::new(RleDecoder::new(data_type)),
+        TSEncoding::Diff | TSEncoding::Zigzag => Box::new(ZigzagDecoder::new(data_type)),
         TSEncoding::Ts2diff => Box::new(Ts2diffDecoder::new(data_type)),
         TSEncoding::Gorilla | TSEncoding::GorillaV1 => {
             Box::new(GorillaDecoder::new(data_type))
         }
+        TSEncoding::Chimp | TSEncoding::Sprintz | TSEncoding::Rlbe | TSEncoding::Camel => {
+            Box::new(GorillaDecoder::new(data_type))
+        }
         _ => Box::new(PlainDecoder::new(data_type)),
+    }
+}
+
+// =========================================================================
+// Dictionary Decoder
+// =========================================================================
+
+pub struct DictionaryDecoder {
+    dictionary: Vec<Binary>,
+    ids: Vec<u32>,
+    index: usize,
+}
+
+impl DictionaryDecoder {
+    pub fn new() -> Self {
+        DictionaryDecoder {
+            dictionary: Vec::new(),
+            ids: Vec::new(),
+            index: 0,
+        }
+    }
+}
+
+impl Decoder for DictionaryDecoder {
+    fn init(&mut self, data: &[u8]) -> TsFileResult<()> {
+        self.dictionary.clear();
+        self.ids.clear();
+        self.index = 0;
+        let mut pos = 0usize;
+        let dictionary_len = read_unsigned_var_long(data, &mut pos)? as usize;
+        for _ in 0..dictionary_len {
+            let len = read_unsigned_var_long(data, &mut pos)? as usize;
+            if pos + len > data.len() {
+                return Err(TsFileError::DecodingError(
+                    "Dictionary entry truncated".to_string(),
+                ));
+            }
+            self.dictionary.push(Binary(data[pos..pos + len].to_vec()));
+            pos += len;
+        }
+        let id_len = read_unsigned_var_long(data, &mut pos)? as usize;
+        for _ in 0..id_len {
+            self.ids.push(read_unsigned_var_long(data, &mut pos)? as u32);
+        }
+        Ok(())
+    }
+
+    fn has_next(&self) -> bool {
+        self.index < self.ids.len()
+    }
+
+    fn read_binary(&mut self) -> TsFileResult<Binary> {
+        if !self.has_next() {
+            return Err(TsFileError::DecodingError("No more dictionary ids".to_string()));
+        }
+        let id = self.ids[self.index] as usize;
+        self.index += 1;
+        self.dictionary.get(id).cloned().ok_or_else(|| {
+            TsFileError::DecodingError(format!("Dictionary id out of range: {}", id))
+        })
+    }
+
+    fn reset(&mut self) {
+        self.index = 0;
+    }
+}
+
+// =========================================================================
+// Zigzag Decoder
+// =========================================================================
+
+pub struct ZigzagDecoder {
+    _data_type: TSDataType,
+    data: Vec<u8>,
+    pos: usize,
+}
+
+impl ZigzagDecoder {
+    pub fn new(data_type: TSDataType) -> Self {
+        ZigzagDecoder {
+            _data_type: data_type,
+            data: Vec::new(),
+            pos: 0,
+        }
+    }
+
+    fn read_value(&mut self) -> TsFileResult<i64> {
+        read_unsigned_var_long(&self.data, &mut self.pos).map(unzigzag_i64)
+    }
+}
+
+impl Decoder for ZigzagDecoder {
+    fn init(&mut self, data: &[u8]) -> TsFileResult<()> {
+        self.data = data.to_vec();
+        self.pos = 0;
+        Ok(())
+    }
+
+    fn has_next(&self) -> bool {
+        self.pos < self.data.len()
+    }
+
+    fn read_i32(&mut self) -> TsFileResult<i32> {
+        Ok(self.read_value()? as i32)
+    }
+
+    fn read_i64(&mut self) -> TsFileResult<i64> {
+        self.read_value()
+    }
+
+    fn reset(&mut self) {
+        self.pos = 0;
     }
 }
 
@@ -215,6 +357,20 @@ impl Decoder for PlainDecoder {
 
     fn reset(&mut self) {
         self.pos = 0;
+    }
+}
+
+pub fn read_next_value(decoder: &mut dyn Decoder, data_type: TSDataType) -> TsFileResult<DecodedValue> {
+    match data_type {
+        TSDataType::Boolean => Ok(DecodedValue::Boolean(decoder.read_bool()?)),
+        TSDataType::Int32 | TSDataType::Date => Ok(DecodedValue::Int32(decoder.read_i32()?)),
+        TSDataType::Int64 | TSDataType::Timestamp => Ok(DecodedValue::Int64(decoder.read_i64()?)),
+        TSDataType::Float => Ok(DecodedValue::Float(decoder.read_f32()?)),
+        TSDataType::Double => Ok(DecodedValue::Double(decoder.read_f64()?)),
+        TSDataType::Text | TSDataType::Blob | TSDataType::String => {
+            Ok(DecodedValue::Binary(decoder.read_binary()?))
+        }
+        _ => Ok(DecodedValue::Null),
     }
 }
 

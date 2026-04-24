@@ -11,8 +11,10 @@ use std::path::Path;
 use crate::error::{TsFileError, TsFileResult};
 use crate::file::metadata::chunk_metadata::ChunkMetadata;
 use crate::write::chunk::ChunkWriter;
+use crate::write::api::{DataWriter, TsFileWriteApi};
 use crate::write::record::{DataPointValue, TSRecord};
 use crate::write::schema::{MeasurementSchema, Schema};
+use crate::write::tablet::Tablet;
 use crate::write::writer::TsFileIOWriter;
 
 /// High-level TsFile writer.
@@ -64,6 +66,22 @@ impl TsFileWriter {
         Ok(writer)
     }
 
+    pub fn set_chunk_group_size_threshold(&mut self, threshold: usize) {
+        self.chunk_group_size_threshold = threshold;
+    }
+
+    pub fn set_unseq(&mut self, is_unseq: bool) {
+        self.is_unseq = is_unseq;
+    }
+
+    pub fn record_count(&self) -> u64 {
+        self.record_count
+    }
+
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
     /// Register a timeseries measurement schema for a device.
     pub fn register_timeseries(
         &mut self,
@@ -88,6 +106,20 @@ impl TsFileWriter {
         Ok(())
     }
 
+    pub fn register_timeseries_batch<I>(
+        &mut self,
+        device_id: String,
+        schemas: I,
+    ) -> TsFileResult<()>
+    where
+        I: IntoIterator<Item = MeasurementSchema>,
+    {
+        for schema in schemas {
+            self.register_timeseries(device_id.clone(), schema)?;
+        }
+        Ok(())
+    }
+
     /// Write a TSRecord.
     ///
     /// Returns an error if:
@@ -100,6 +132,10 @@ impl TsFileWriter {
         let timestamp = record.timestamp;
 
         // Check ordering
+        if record.data_points.is_empty() {
+            return Ok(false);
+        }
+
         if !self.is_unseq {
             if let Some(&last_ts) = self.last_timestamps.get(&device_id) {
                 if timestamp <= last_ts {
@@ -179,6 +215,26 @@ impl TsFileWriter {
         Ok(true)
     }
 
+    /// Write all rows in a tablet batch.
+    pub fn write_tablet(&mut self, tablet: &Tablet) -> TsFileResult<usize> {
+        for schema in &tablet.schemas {
+            self.register_timeseries(tablet.device_id.clone(), schema.clone())?;
+        }
+        let records = tablet.to_records();
+        let row_count = records.len();
+        for record in records {
+            self.write(record)?;
+        }
+        Ok(row_count)
+    }
+
+    /// Write a tablet and reset it after successful flush, matching Java's common usage pattern.
+    pub fn write_tablet_and_reset(&mut self, tablet: &mut Tablet) -> TsFileResult<usize> {
+        let written = self.write_tablet(tablet)?;
+        tablet.reset();
+        Ok(written)
+    }
+
     /// Flush all chunk groups to disk.
     pub fn flush_all_chunk_groups(&mut self) -> TsFileResult<()> {
         // Sort device IDs to ensure deterministic order (matches Java's TreeMap behavior)
@@ -236,5 +292,29 @@ impl TsFileWriter {
         self.flush_all_chunk_groups()?;
         self.io_writer.end_file()?;
         Ok(())
+    }
+}
+
+impl DataWriter for TsFileWriter {
+    fn write_record(&mut self, record: TSRecord) -> TsFileResult<bool> {
+        self.write(record)
+    }
+
+    fn write_tablet_batch(&mut self, tablet: &Tablet) -> TsFileResult<usize> {
+        self.write_tablet(tablet)
+    }
+}
+
+impl TsFileWriteApi for TsFileWriter {
+    fn register_timeseries(
+        &mut self,
+        device_id: String,
+        schema: MeasurementSchema,
+    ) -> TsFileResult<()> {
+        TsFileWriter::register_timeseries(self, device_id, schema)
+    }
+
+    fn close(self) -> TsFileResult<()> {
+        TsFileWriter::close(self)
     }
 }
