@@ -1,0 +1,51 @@
+[package]
+name = "tsfile"
+version = "1.0.0"
+edition = "2021"
+authors = ["Apache TsFile Contributors"]
+description = "A Rust implementation of the Apache TsFile format"
+license = "Apache-2.0"
+repository = "https://github.com/apache/tsfile"
+keywords = ["tsfile", "timeseries", "iot", "database"]
+categories = ["database", "encoding", "filesystem"]
+
+[lib]
+name = "tsfile"
+path = "src/lib.rs"
+
+[[example]]
+name = "write_tsfile"
+path = "examples/write_tsfile.rs"
+
+[[example]]
+name = "read_tsfile"
+path = "examples/read_tsfile.rs"
+
+[dependencies]
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Compression
+snap = "1.1"           # Snappy
+flate2 = "1.0"         # GZIP / ZLIB
+lz4_flex = "0.11"      # LZ4
+
+# Serialization helpers
+byteorder = "1.5"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Bloom filter
+bit-vec = "0.6"
+
+[dev-dependencies]
+tempfile = "3.0"
+env_logger = "0.11"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

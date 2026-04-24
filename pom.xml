@@ -137,6 +137,8 @@
                             <exclude>**/third_party/**</exclude>
                             <exclude>**/.python-version</exclude>
                             <exclude>**/**venv-py**/**</exclude>
+                            <!-- Exclude Rust files -->
+                            <exclude>rust/**</exclude>
                         </excludes>
                     </configuration>
                 </plugin>
