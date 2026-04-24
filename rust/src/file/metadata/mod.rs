@@ -11,6 +11,14 @@ pub mod metadata_index_node;
 pub mod device_id;
 pub mod table_schema;
 pub mod tsfile_metadata;
+pub mod aligned_metadata;
+pub mod table_device_metadata;
+pub mod metadata_index_constructor;
+pub mod id_column;
+pub mod idcolumn;
+pub mod logical_table_schema;
+pub mod statistics_ext;
+pub mod enums;
 
 pub use statistics::Statistics;
 pub use traits::{ChunkMetadataView, Metadata, TimeSeriesMetadataView};
@@ -23,3 +31,17 @@ pub use metadata_index_node::{
 pub use device_id::DeviceId;
 pub use table_schema::{ColumnCategory, ColumnSchema, ColumnSchemaBuilder, TableSchema};
 pub use tsfile_metadata::TsFileMetadata;
+pub use aligned_metadata::{
+    AlignedChunkMetadata, AlignedChunkMetadataView, AlignedTimeSeriesMetadata,
+    AlignedTimeSeriesMetadataView,
+};
+pub use table_device_metadata::{TableDeviceChunkMetadata, TableDeviceTimeSeriesMetadata};
+pub use metadata_index_constructor::{MetadataIndexConstructor, SerializedMetadataIndex};
+pub use id_column::{
+    DatabaseNameExtractor, FourOrHigherLevelDBExtractor, ThreeLevelDBExtractor,
+    TwoLevelDBExtractor,
+};
+pub use logical_table_schema::LogicalTableSchema;
+pub use statistics_ext::*;
+pub use enums::EncryptionType;
+pub use idcolumn::{FourOrHigherLevelDBExtractor as JavaFourOrHigherLevelDBExtractor, ThreeLevelDBExtractor as JavaThreeLevelDBExtractor, TwoLevelDBExtractor as JavaTwoLevelDBExtractor};

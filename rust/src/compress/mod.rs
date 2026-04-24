@@ -33,6 +33,9 @@ pub fn create_compressor(compression: CompressionType) -> Box<dyn Compressor> {
         CompressionType::Snappy => Box::new(SnappyCompressor),
         CompressionType::Gzip => Box::new(GzipCompressor),
         CompressionType::Lz4 => Box::new(Lz4Compressor),
+        CompressionType::Lzo | CompressionType::Sdt | CompressionType::Paa | CompressionType::Pla => {
+            Box::new(UnsupportedCompressor { compression_type: compression })
+        }
         CompressionType::Zstd => {
             log::warn!("ZSTD compression not supported, using uncompressed");
             Box::new(UncompressedCompressor)
@@ -51,6 +54,9 @@ pub fn create_decompressor(compression: CompressionType) -> Box<dyn Decompressor
         CompressionType::Snappy => Box::new(SnappyDecompressor),
         CompressionType::Gzip => Box::new(GzipDecompressor),
         CompressionType::Lz4 => Box::new(Lz4Decompressor),
+        CompressionType::Lzo | CompressionType::Sdt | CompressionType::Paa | CompressionType::Pla => {
+            Box::new(UnsupportedDecompressor { compression_type: compression })
+        }
         CompressionType::Zstd => {
             log::warn!("ZSTD decompression not supported, assuming uncompressed");
             Box::new(UncompressedDecompressor)
@@ -59,6 +65,49 @@ pub fn create_decompressor(compression: CompressionType) -> Box<dyn Decompressor
             log::warn!("LZMA2 decompression not supported, assuming uncompressed");
             Box::new(UncompressedDecompressor)
         }
+    }
+}
+
+
+// =========================================================================
+// Unsupported Java enum-compatible compression algorithms
+// =========================================================================
+
+pub struct UnsupportedCompressor {
+    compression_type: CompressionType,
+}
+
+impl Compressor for UnsupportedCompressor {
+    fn compress(&self, _data: &[u8]) -> TsFileResult<Vec<u8>> {
+        Err(TsFileError::UnsupportedOperation(format!(
+            "Compression {} is declared for metadata compatibility but not implemented",
+            self.compression_type
+        )))
+    }
+
+    fn compression_type(&self) -> CompressionType {
+        self.compression_type
+    }
+
+    fn max_compressed_size(&self, input_len: usize) -> usize {
+        input_len
+    }
+}
+
+pub struct UnsupportedDecompressor {
+    compression_type: CompressionType,
+}
+
+impl Decompressor for UnsupportedDecompressor {
+    fn decompress(&self, _data: &[u8], _output_len: usize) -> TsFileResult<Vec<u8>> {
+        Err(TsFileError::UnsupportedOperation(format!(
+            "Decompression {} is declared for metadata compatibility but not implemented",
+            self.compression_type
+        )))
+    }
+
+    fn compression_type(&self) -> CompressionType {
+        self.compression_type
     }
 }
 

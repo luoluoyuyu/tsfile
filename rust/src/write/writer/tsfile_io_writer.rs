@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use crate::common::constant::TsFileConstant;
@@ -35,6 +35,12 @@ pub struct TsFileIOWriter {
     current_chunk_metadata_list: Vec<ChunkMetadata>,
     /// Path count for bloom filter.
     path_count: usize,
+    /// Position marked for recoverable append/reset operations.
+    marked_position: Option<u64>,
+    /// Whether this writer still accepts writes.
+    can_write: bool,
+    /// Whether a complete footer has already been written.
+    has_footer: bool,
 }
 
 impl TsFileIOWriter {
@@ -52,6 +58,9 @@ impl TsFileIOWriter {
             current_device_id: None,
             current_chunk_metadata_list: Vec::new(),
             path_count: 0,
+            marked_position: None,
+            can_write: true,
+            has_footer: false,
         };
         writer.start_file()?;
         Ok(writer)
@@ -66,6 +75,7 @@ impl TsFileIOWriter {
     }
 
     fn write_bytes(&mut self, data: &[u8]) -> TsFileResult<()> {
+        self.ensure_can_write()?;
         self.writer.write_all(data)?;
         self.position += data.len() as u64;
         Ok(())
@@ -78,6 +88,70 @@ impl TsFileIOWriter {
     /// Get current write position.
     pub fn position(&self) -> u64 {
         self.position
+    }
+
+    fn ensure_can_write(&self) -> TsFileResult<()> {
+        if self.can_write {
+            Ok(())
+        } else {
+            Err(crate::error::TsFileError::WriteError(
+                "TsFileIOWriter is closed for writing".to_string(),
+            ))
+        }
+    }
+
+    /// Flush buffered bytes to the underlying file.
+    pub fn flush(&mut self) -> TsFileResult<()> {
+        self.writer.flush()?;
+        Ok(())
+    }
+
+    /// Mark the current logical write position for later reset.
+    pub fn mark(&mut self) {
+        self.marked_position = Some(self.position);
+    }
+
+    /// Return the currently marked position, if any.
+    pub fn marked_position(&self) -> Option<u64> {
+        self.marked_position
+    }
+
+    /// Reset the writer to the last mark and truncate bytes written after it.
+    pub fn reset_to_mark(&mut self) -> TsFileResult<()> {
+        let mark = self.marked_position.ok_or_else(|| {
+            crate::error::TsFileError::WriteError("no marked position to reset".to_string())
+        })?;
+        self.truncate(mark)
+    }
+
+    /// Truncate the underlying file and move the logical write cursor to `offset`.
+    pub fn truncate(&mut self, offset: u64) -> TsFileResult<()> {
+        self.ensure_can_write()?;
+        self.writer.flush()?;
+        self.writer.get_mut().set_len(offset)?;
+        self.writer.seek(SeekFrom::Start(offset))?;
+        self.position = offset;
+        self.has_footer = false;
+        Ok(())
+    }
+
+    /// Close the writer without appending a metadata footer.
+    pub fn close_without_footer(&mut self) -> TsFileResult<()> {
+        if self.can_write {
+            self.writer.flush()?;
+            self.can_write = false;
+        }
+        Ok(())
+    }
+
+    /// Whether this writer can still accept bytes.
+    pub fn can_write(&self) -> bool {
+        self.can_write
+    }
+
+    /// Whether a complete metadata/footer section has been written.
+    pub fn has_footer(&self) -> bool {
+        self.has_footer
     }
 
     /// Start writing a chunk group for a device.
@@ -127,6 +201,13 @@ impl TsFileIOWriter {
     /// End the file: write all metadata and the file footer.
     /// Format matches Java exactly: [SEPARATOR] [TimeseriesMetadata...] [MetadataIndexNode...] [TsFileMetadata] [metaSize(i32)] [Magic]
     pub fn end_file(&mut self) -> TsFileResult<()> {
+        self.ensure_can_write()?;
+        if self.current_device_id.is_some() {
+            self.end_chunk_group()?;
+        }
+        if self.has_footer {
+            return Ok(());
+        }
         // Record the offset of the metadata section (before SEPARATOR)
         // This matches Java's: long metaOffset = out.getPosition();
         let meta_offset = self.position;
@@ -232,6 +313,8 @@ impl TsFileIOWriter {
 
         // Flush
         self.writer.flush()?;
+        self.has_footer = true;
+        self.can_write = false;
         log::debug!("TsFile ended successfully, metadata size: {}", meta_size);
         Ok(())
     }

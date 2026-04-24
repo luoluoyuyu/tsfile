@@ -29,6 +29,12 @@ pub struct TimeseriesMetadata {
     pub statistics: Statistics,
     /// Cached chunk metadata list (may be loaded lazily).
     pub chunk_metadata_list: Vec<ChunkMetadata>,
+    /// Data type after schema evolution; None means unchanged.
+    pub new_type: Option<TSDataType>,
+    /// Whether this metadata has deletion/modification information attached.
+    pub modified: bool,
+    /// Whether statistics cannot be trusted after type modification.
+    pub data_type_modified_and_cannot_use_statistics: bool,
 }
 
 impl TimeseriesMetadata {
@@ -45,6 +51,9 @@ impl TimeseriesMetadata {
             data_size_of_chunks: 0,
             statistics,
             chunk_metadata_list: Vec::new(),
+            new_type: None,
+            modified: false,
+            data_type_modified_and_cannot_use_statistics: false,
         }
     }
 
@@ -79,35 +88,109 @@ impl TimeseriesMetadata {
 
     /// Deserialize from reader.
     pub fn deserialize<R: Read>(reader: &mut R) -> TsFileResult<Self> {
+        Self::deserialize_with_chunks(reader, false)
+    }
+
+    pub fn deserialize_with_chunks<R: Read>(
+        reader: &mut R,
+        need_chunk_metadata: bool,
+    ) -> TsFileResult<Self> {
         let type_byte = ReadWriteIOUtils::read_byte(reader)?;
         let measurement_id = ReadWriteIOUtils::read_var_int_string(reader)?;
         let data_type_byte = ReadWriteIOUtils::read_byte(reader)?;
         let data_type = TSDataType::deserialize(data_type_byte)?;
         let data_size = ReadWriteForEncodingUtils::read_unsigned_var_int(reader)?;
         let statistics = Statistics::deserialize(reader, data_type)?;
+        let mut chunk_bytes = vec![0u8; data_size as usize];
+        reader.read_exact(&mut chunk_bytes)?;
+        let mut chunk_metadata_list = Vec::new();
+        if need_chunk_metadata {
+            let include_statistics = (type_byte & 0x3F) != 0;
+            let mut cursor = std::io::Cursor::new(chunk_bytes);
+            while (cursor.position() as usize) < data_size as usize {
+                chunk_metadata_list.push(ChunkMetadata::deserialize_with_statistics(
+                    &mut cursor,
+                    measurement_id.clone(),
+                    data_type,
+                    include_statistics,
+                )?);
+            }
+        }
         Ok(TimeseriesMetadata {
             time_series_metadata_type: type_byte,
             measurement_id,
             data_type,
             data_size_of_chunks: data_size,
             statistics,
-            chunk_metadata_list: Vec::new(),
+            chunk_metadata_list,
+            new_type: None,
+            modified: false,
+            data_type_modified_and_cannot_use_statistics: false,
         })
+    }
+
+    pub fn statistics(&self) -> &Statistics {
+        &self.statistics
+    }
+
+    pub fn start_time(&self) -> i64 {
+        self.statistics.start_time
+    }
+
+    pub fn end_time(&self) -> i64 {
+        self.statistics.end_time
+    }
+
+    pub fn set_new_type(&mut self, data_type: TSDataType) {
+        self.new_type = Some(data_type);
+    }
+
+    pub fn effective_data_type(&self) -> TSDataType {
+        self.new_type.unwrap_or(self.data_type)
+    }
+
+    pub fn type_match(&self, data_type: TSDataType) -> bool {
+        self.effective_data_type().is_compatible(&data_type)
+    }
+
+    pub fn is_modified(&self) -> bool {
+        self.modified
+    }
+
+    pub fn set_modified(&mut self, modified: bool) {
+        self.modified = modified;
+        for chunk_metadata in &mut self.chunk_metadata_list {
+            chunk_metadata.set_modified(modified);
+        }
+    }
+
+    pub fn is_data_type_modified_and_cannot_use_statistics(&self) -> bool {
+        self.data_type_modified_and_cannot_use_statistics
+    }
+
+    pub fn set_data_type_modified_and_cannot_use_statistics(&mut self, value: bool) {
+        self.data_type_modified_and_cannot_use_statistics = value;
+        for chunk_metadata in &mut self.chunk_metadata_list {
+            chunk_metadata.set_data_type_modified_and_cannot_use_statistics(value);
+        }
     }
 }
 
 impl Metadata for TimeseriesMetadata {
-    fn time_statistics(&self) -> Option<&Statistics> {
-        Some(&self.statistics)
+    fn statistics(&self) -> &Statistics {
+        &self.statistics
     }
 }
 
 impl TimeSeriesMetadataView for TimeseriesMetadata {
-    fn measurement_id(&self) -> &str {
-        &self.measurement_id
-    }
-
-    fn data_type(&self) -> TSDataType {
-        self.data_type
-    }
+    fn measurement_id(&self) -> &str { &self.measurement_id }
+    fn data_type(&self) -> TSDataType { self.data_type }
+    fn is_modified(&self) -> bool { self.is_modified() }
+    fn set_modified(&mut self, modified: bool) { self.set_modified(modified); }
+    fn is_data_type_modified_and_cannot_use_statistics(&self) -> bool { self.is_data_type_modified_and_cannot_use_statistics() }
+    fn set_data_type_modified_and_cannot_use_statistics(&mut self, value: bool) { self.set_data_type_modified_and_cannot_use_statistics(value); }
+    fn is_seq(&self) -> bool { self.chunk_metadata_list.iter().all(|chunk| chunk.is_seq()) }
+    fn set_seq(&mut self, seq: bool) { for chunk in &mut self.chunk_metadata_list { chunk.set_seq(seq); } }
+    fn load_chunk_metadata_list(&self) -> Vec<ChunkMetadata> { self.chunk_metadata_list.clone() }
+    fn type_match(&mut self, data_types: &[TSDataType]) -> bool { data_types.first().is_none_or(|data_type| TimeseriesMetadata::type_match(self, *data_type)) }
 }

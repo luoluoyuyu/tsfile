@@ -4,6 +4,31 @@
 //! Statistics for various data types, mirroring Java's Statistics hierarchy.
 //! Uses an enum-based approach for dyn-compatibility in Rust.
 
+#[path = "statistics/binary_statistics.rs"]
+pub mod binary_statistics;
+#[path = "statistics/blob_statistics.rs"]
+pub mod blob_statistics;
+#[path = "statistics/boolean_statistics.rs"]
+pub mod boolean_statistics;
+#[path = "statistics/date_statistics.rs"]
+pub mod date_statistics;
+#[path = "statistics/double_statistics.rs"]
+pub mod double_statistics;
+#[path = "statistics/float_statistics.rs"]
+pub mod float_statistics;
+#[path = "statistics/integer_statistics.rs"]
+pub mod integer_statistics;
+#[path = "statistics/long_statistics.rs"]
+pub mod long_statistics;
+#[path = "statistics/object_statistics.rs"]
+pub mod object_statistics;
+#[path = "statistics/string_statistics.rs"]
+pub mod string_statistics;
+#[path = "statistics/time_statistics.rs"]
+pub mod time_statistics;
+#[path = "statistics/timestamp_statistics.rs"]
+pub mod timestamp_statistics;
+
 use std::io::{Read, Write};
 
 use crate::common::enums::TSDataType;
@@ -504,3 +529,16 @@ impl BinaryStats {
 
 #[derive(Debug, Clone, Default)]
 pub struct TimeStats;
+
+pub use binary_statistics::BinaryStatistics;
+pub use blob_statistics::BlobStatistics;
+pub use boolean_statistics::BooleanStatistics;
+pub use date_statistics::DateStatistics;
+pub use double_statistics::DoubleStatistics;
+pub use float_statistics::FloatStatistics;
+pub use integer_statistics::IntegerStatistics;
+pub use long_statistics::LongStatistics;
+pub use object_statistics::ObjectStatistics;
+pub use string_statistics::StringStatistics;
+pub use time_statistics::TimeStatistics;
+pub use timestamp_statistics::TimestampStatistics;

@@ -9,6 +9,7 @@ use crate::compress::create_decompressor;
 use crate::error::TsFileResult;
 use crate::file::header::{ChunkHeader, PageHeader};
 use crate::file::meta_marker::MetaMarker;
+use crate::read::filter::Filter;
 use crate::read::reader::page_reader::PageReader;
 use crate::read::time_value_pair::TimeValuePair;
 
@@ -23,6 +24,10 @@ impl ChunkReader {
     }
 
     pub fn read_all(&self) -> TsFileResult<Vec<TimeValuePair>> {
+        self.read_with_filter(None)
+    }
+
+    pub fn read_with_filter(&self, filter: Option<&Filter>) -> TsFileResult<Vec<TimeValuePair>> {
         let has_multiple_pages = (self.header.chunk_type & 0x3F) == MetaMarker::CHUNK_HEADER;
         let has_page_statistics = has_multiple_pages;
         let decompressor = create_decompressor(self.header.compression_type);
@@ -49,8 +54,12 @@ impl ChunkReader {
                 self.header.encoding_type,
                 page_data,
             );
-            results.extend(page_reader.read_all()?);
+            results.extend(page_reader.read_with_filter(filter)?);
         }
         Ok(results)
+    }
+
+    pub fn into_point_reader(self) -> TsFileResult<crate::read::reader::VecPointReader> {
+        Ok(crate::read::reader::VecPointReader::new(self.read_all()?))
     }
 }

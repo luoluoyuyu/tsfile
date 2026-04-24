@@ -55,6 +55,22 @@ impl TsFileMetadata {
         self.ts_file_properties.insert(key, value);
     }
 
+    pub fn metadata_index_node(&self, table_name: &str) -> Option<&MetadataIndexNode> {
+        self.table_metadata_index_node_map
+            .get(table_name)
+            .or_else(|| self.table_metadata_index_node_map.get(""))
+    }
+
+    pub fn may_contain_path(&self, full_path: &str) -> bool {
+        self.bloom_filter
+            .as_ref()
+            .is_none_or(|bloom_filter| bloom_filter.contains(full_path))
+    }
+
+    pub fn property(&self, key: &str) -> Option<&str> {
+        self.ts_file_properties.get(key).map(String::as_str)
+    }
+
     pub fn add_table_schema(&mut self, table_name: String, schema: TableSchema) {
         self.table_schema_map.insert(table_name.to_lowercase(), schema);
     }

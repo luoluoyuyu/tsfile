@@ -107,6 +107,14 @@ pub enum CompressionType {
     Snappy,
     /// GZIP compression.
     Gzip,
+    /// LZO compression.
+    Lzo,
+    /// SDT compression.
+    Sdt,
+    /// PAA compression.
+    Paa,
+    /// PLA compression.
+    Pla,
     /// LZ4 compression.
     Lz4,
     /// Zstandard compression.
@@ -127,6 +135,10 @@ impl CompressionType {
             0 => Ok(CompressionType::Uncompressed),
             1 => Ok(CompressionType::Snappy),
             2 => Ok(CompressionType::Gzip),
+            3 => Ok(CompressionType::Lzo),
+            4 => Ok(CompressionType::Sdt),
+            5 => Ok(CompressionType::Paa),
+            6 => Ok(CompressionType::Pla),
             7 => Ok(CompressionType::Lz4),
             8 => Ok(CompressionType::Zstd),
             9 => Ok(CompressionType::Lzma2),
@@ -140,6 +152,10 @@ impl CompressionType {
             CompressionType::Uncompressed => 0,
             CompressionType::Snappy => 1,
             CompressionType::Gzip => 2,
+            CompressionType::Lzo => 3,
+            CompressionType::Sdt => 4,
+            CompressionType::Paa => 5,
+            CompressionType::Pla => 6,
             CompressionType::Lz4 => 7,
             CompressionType::Zstd => 8,
             CompressionType::Lzma2 => 9,
@@ -152,6 +168,10 @@ impl CompressionType {
             CompressionType::Uncompressed => "",
             CompressionType::Snappy => ".snappy",
             CompressionType::Gzip => ".gzip",
+            CompressionType::Lzo => ".lzo",
+            CompressionType::Sdt => ".sdt",
+            CompressionType::Paa => ".paa",
+            CompressionType::Pla => ".pla",
             CompressionType::Lz4 => ".lz4",
             CompressionType::Zstd => ".zstd",
             CompressionType::Lzma2 => ".lzma2",
@@ -165,6 +185,10 @@ impl std::fmt::Display for CompressionType {
             CompressionType::Uncompressed => write!(f, "UNCOMPRESSED"),
             CompressionType::Snappy => write!(f, "SNAPPY"),
             CompressionType::Gzip => write!(f, "GZIP"),
+            CompressionType::Lzo => write!(f, "LZO"),
+            CompressionType::Sdt => write!(f, "SDT"),
+            CompressionType::Paa => write!(f, "PAA"),
+            CompressionType::Pla => write!(f, "PLA"),
             CompressionType::Lz4 => write!(f, "LZ4"),
             CompressionType::Zstd => write!(f, "ZSTD"),
             CompressionType::Lzma2 => write!(f, "LZMA2"),

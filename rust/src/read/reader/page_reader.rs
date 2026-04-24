@@ -6,6 +6,7 @@
 use crate::common::enums::{TSDataType, TSEncoding};
 use crate::encoding::decoder::{create_decoder, read_next_value, DecodedValue};
 use crate::error::{TsFileError, TsFileResult};
+use crate::read::filter::Filter;
 use crate::read::time_value_pair::{TimeValue, TimeValuePair};
 use crate::utils::ReadWriteIOUtils;
 
@@ -25,6 +26,10 @@ impl PageReader {
     }
 
     pub fn read_all(&self) -> TsFileResult<Vec<TimeValuePair>> {
+        self.read_with_filter(None)
+    }
+
+    pub fn read_with_filter(&self, filter: Option<&Filter>) -> TsFileResult<Vec<TimeValuePair>> {
         let mut page_cursor = std::io::Cursor::new(&self.page_data);
         let time_len = ReadWriteIOUtils::read_i32(&mut page_cursor)? as usize;
         let time_data_start = page_cursor.position() as usize;
@@ -48,7 +53,9 @@ impl PageReader {
         while time_decoder.has_next() && value_decoder.has_next() {
             let timestamp = time_decoder.read_i64()?;
             let value = time_value_from_decoded(read_next_value(value_decoder.as_mut(), self.data_type)?);
-            results.push(TimeValuePair::new(timestamp, value));
+            if filter.is_none_or(|filter| filter.satisfy(timestamp, &value)) {
+                results.push(TimeValuePair::new(timestamp, value));
+            }
         }
         Ok(results)
     }

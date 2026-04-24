@@ -62,6 +62,15 @@ impl TsFileReader {
         device_id: &str,
         measurement_id: &str,
     ) -> TsFileResult<Vec<TimeValuePair>> {
+        if self.cache.is_none() {
+            let points = self
+                .sequence_reader
+                .read_timeseries_by_index(device_id, measurement_id)?;
+            if !points.is_empty() {
+                return Ok(points);
+            }
+        }
+
         self.load_cache()?;
         let cache = self.cache.as_ref().unwrap();
         Ok(cache

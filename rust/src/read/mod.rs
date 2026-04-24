@@ -6,15 +6,23 @@
 pub mod time_value_pair;
 pub mod common;
 pub mod api;
+pub mod block;
+pub mod expression;
+pub mod filter;
 pub mod reader;
 pub mod result_set;
 pub mod tsfile_reader;
+pub mod v4;
 pub mod tsfile_sequence_reader;
 
 pub use time_value_pair::{TimeValue, TimeValuePair};
 pub use api::{TsFileReadApi, TsFileReaderBuilder};
+pub use block::{Column, ColumnBuilder, ColumnValue, TsBlock, TsBlockBuilder};
+pub use expression::{Expression, QueryExecutor};
+pub use filter::{Filter, OperatorType, TimeFilterApi, ValueFilterApi};
 pub use common::{BatchData, Chunk, Field, Path, RowRecord, TimeRange, TimeSeries};
 pub use reader::{ChunkReader, PageReader};
 pub use result_set::{QueryExpression, ResultSet};
 pub use tsfile_reader::TsFileReader;
+pub use v4::{DeviceTableModelReader, ITsFileReader, TsFileTreeReader};
 pub use tsfile_sequence_reader::TsFileSequenceReader;

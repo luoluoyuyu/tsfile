@@ -452,6 +452,14 @@ impl Decoder for RleDecoder {
         Ok(self.read_i64()? != 0)
     }
 
+    fn read_f32(&mut self) -> TsFileResult<f32> {
+        Ok(f32::from_bits(self.read_i64()? as u32))
+    }
+
+    fn read_f64(&mut self) -> TsFileResult<f64> {
+        Ok(f64::from_bits(self.read_i64()? as u64))
+    }
+
     fn reset(&mut self) {
         self.pos = 0;
         self.current_run_remaining = 0;
@@ -568,6 +576,10 @@ pub struct GorillaDecoder {
     last_value: u64,
     is_first: bool,
 }
+
+pub type ChimpDecoder = GorillaDecoder;
+pub type SprintzDecoder = GorillaDecoder;
+pub type CamelDecoder = GorillaDecoder;
 
 impl GorillaDecoder {
     pub fn new(data_type: TSDataType) -> Self {

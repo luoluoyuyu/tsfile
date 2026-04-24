@@ -11,10 +11,15 @@ use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::common::constant::TsFileConstant;
+use crate::common::enums::MetadataIndexNodeType;
 use crate::error::{TsFileError, TsFileResult};
 use crate::file::header::{ChunkGroupHeader, ChunkHeader};
 use crate::file::meta_marker::MetaMarker;
 use crate::file::metadata::tsfile_metadata::TsFileMetadata;
+use crate::file::metadata::chunk_metadata::ChunkMetadata;
+use crate::file::metadata::timeseries_metadata::TimeseriesMetadata;
+use crate::file::metadata::metadata_index_node::MetadataIndexNode;
+use crate::read::filter::Filter;
 use crate::read::reader::ChunkReader;
 use crate::read::time_value_pair::TimeValuePair;
 
@@ -203,6 +208,203 @@ impl TsFileSequenceReader {
             }
         }
         Ok(data_map)
+    }
+
+    /// Read one chunk by its metadata offset.
+    pub fn read_chunk_by_metadata(
+        &mut self,
+        chunk_metadata: &ChunkMetadata,
+    ) -> TsFileResult<(ChunkHeader, Vec<u8>)> {
+        self.reader
+            .seek(SeekFrom::Start(chunk_metadata.offset_of_chunk_header as u64))?;
+        let mut marker = [0u8; 1];
+        self.reader.read_exact(&mut marker)?;
+        let chunk_header = ChunkHeader::deserialize(&mut self.reader, marker[0])?;
+        let mut chunk_data = vec![0u8; chunk_header.data_size as usize];
+        self.reader.read_exact(&mut chunk_data)?;
+        Ok((chunk_header, chunk_data))
+    }
+
+    /// Decode chunks referenced by chunk metadata.
+    pub fn read_by_chunk_metadata(
+        &mut self,
+        chunk_metadata_list: &[ChunkMetadata],
+    ) -> TsFileResult<Vec<TimeValuePair>> {
+        let mut points = Vec::new();
+        for chunk_metadata in chunk_metadata_list {
+            let (chunk_header, chunk_data) = self.read_chunk_by_metadata(chunk_metadata)?;
+            points.extend(ChunkReader::new(chunk_header, chunk_data).read_all()?);
+        }
+        points.sort_by_key(|point| point.timestamp);
+        Ok(points)
+    }
+
+    /// Decode chunks referenced by chunk metadata with conservative statistics pushdown.
+    pub fn read_by_chunk_metadata_with_filter(
+        &mut self,
+        chunk_metadata_list: &[ChunkMetadata],
+        filter: Option<&Filter>,
+    ) -> TsFileResult<Vec<TimeValuePair>> {
+        let mut points = Vec::new();
+        for chunk_metadata in chunk_metadata_list {
+            if let Some(filter) = filter {
+                if !filter.satisfy_statistics(&chunk_metadata.statistics) {
+                    continue;
+                }
+            }
+            let (chunk_header, chunk_data) = self.read_chunk_by_metadata(chunk_metadata)?;
+            points.extend(ChunkReader::new(chunk_header, chunk_data).read_with_filter(filter)?);
+        }
+        points.sort_by_key(|point| point.timestamp);
+        Ok(points)
+    }
+
+    /// Read timeseries metadata at a known file offset.
+    pub fn read_timeseries_metadata_at(
+        &mut self,
+        offset: i64,
+        need_chunk_metadata: bool,
+    ) -> TsFileResult<TimeseriesMetadata> {
+        self.reader.seek(SeekFrom::Start(offset as u64))?;
+        TimeseriesMetadata::deserialize_with_chunks(&mut self.reader, need_chunk_metadata)
+    }
+
+    /// Read a metadata index node from a known file offset.
+    pub fn read_metadata_index_node_at(&mut self, offset: i64) -> TsFileResult<MetadataIndexNode> {
+        if offset < 0 {
+            return Err(TsFileError::InvalidFileFormat(format!(
+                "negative metadata index node offset: {}",
+                offset
+            )));
+        }
+        self.reader.seek(SeekFrom::Start(offset as u64))?;
+        MetadataIndexNode::deserialize(&mut self.reader)
+    }
+
+    /// Find the file offset of a timeseries metadata entry through the footer index tree.
+    pub fn find_timeseries_metadata_offset(
+        &mut self,
+        device_id: &str,
+        measurement_id: &str,
+    ) -> TsFileResult<Option<i64>> {
+        let root = {
+            let metadata = self.read_file_metadata()?;
+            match metadata.metadata_index_node("") {
+                Some(node) => node.clone(),
+                None => return Ok(None),
+            }
+        };
+
+        let measurement_node = self.find_measurement_root_node(root, device_id)?;
+        let Some(measurement_node) = measurement_node else {
+            return Ok(None);
+        };
+        self.find_measurement_metadata_offset(measurement_node, measurement_id)
+    }
+
+    /// Read timeseries metadata through the footer index tree.
+    pub fn read_timeseries_metadata(
+        &mut self,
+        device_id: &str,
+        measurement_id: &str,
+        need_chunk_metadata: bool,
+    ) -> TsFileResult<Option<TimeseriesMetadata>> {
+        let Some(offset) = self.find_timeseries_metadata_offset(device_id, measurement_id)? else {
+            return Ok(None);
+        };
+        Ok(Some(self.read_timeseries_metadata_at(offset, need_chunk_metadata)?))
+    }
+
+    /// Read one series through metadata index and decode its chunks.
+    pub fn read_timeseries_by_index(
+        &mut self,
+        device_id: &str,
+        measurement_id: &str,
+    ) -> TsFileResult<Vec<TimeValuePair>> {
+        let Some(metadata) = self.read_timeseries_metadata(device_id, measurement_id, true)? else {
+            return Ok(Vec::new());
+        };
+        self.read_by_chunk_metadata_with_filter(&metadata.chunk_metadata_list, None)
+    }
+
+    /// Read one series through metadata index with chunk/page filtering.
+    pub fn read_timeseries_by_index_with_filter(
+        &mut self,
+        device_id: &str,
+        measurement_id: &str,
+        filter: Option<&Filter>,
+    ) -> TsFileResult<Vec<TimeValuePair>> {
+        let Some(metadata) = self.read_timeseries_metadata(device_id, measurement_id, true)? else {
+            return Ok(Vec::new());
+        };
+        if let Some(filter) = filter {
+            if !filter.satisfy_statistics(&metadata.statistics) {
+                return Ok(Vec::new());
+            }
+        }
+        self.read_by_chunk_metadata_with_filter(&metadata.chunk_metadata_list, filter)
+    }
+
+    fn find_measurement_root_node(
+        &mut self,
+        mut node: MetadataIndexNode,
+        device_id: &str,
+    ) -> TsFileResult<Option<MetadataIndexNode>> {
+        loop {
+            match node.node_type {
+                MetadataIndexNodeType::LeafDevice => {
+                    let Some((entry, _)) = node.child_index_entry(device_id, true) else {
+                        return Ok(None);
+                    };
+                    return Ok(Some(self.read_metadata_index_node_at(entry.offset)?));
+                }
+                MetadataIndexNodeType::InternalDevice => {
+                    let Some((entry, _)) = node.child_index_entry(device_id, false) else {
+                        return Ok(None);
+                    };
+                    node = self.read_metadata_index_node_at(entry.offset)?;
+                }
+                MetadataIndexNodeType::InternalMeasurement | MetadataIndexNodeType::LeafMeasurement => {
+                    return Ok(Some(node));
+                }
+            }
+        }
+    }
+
+    fn find_measurement_metadata_offset(
+        &mut self,
+        mut node: MetadataIndexNode,
+        measurement_id: &str,
+    ) -> TsFileResult<Option<i64>> {
+        loop {
+            match node.node_type {
+                MetadataIndexNodeType::LeafMeasurement => {
+                    return Ok(node
+                        .child_index_entry(measurement_id, true)
+                        .map(|(entry, _)| entry.offset));
+                }
+                MetadataIndexNodeType::InternalMeasurement => {
+                    let Some((entry, _)) = node.child_index_entry(measurement_id, false) else {
+                        return Ok(None);
+                    };
+                    node = self.read_metadata_index_node_at(entry.offset)?;
+                }
+                MetadataIndexNodeType::InternalDevice | MetadataIndexNodeType::LeafDevice => {
+                    return Err(TsFileError::InvalidFileFormat(
+                        "device metadata index node found while searching measurement".to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Read a timeseries by a timeseries metadata offset.
+    pub fn read_timeseries_by_metadata_offset(
+        &mut self,
+        offset: i64,
+    ) -> TsFileResult<Vec<TimeValuePair>> {
+        let metadata = self.read_timeseries_metadata_at(offset, true)?;
+        self.read_by_chunk_metadata_with_filter(&metadata.chunk_metadata_list, None)
     }
 
     /// Read all time-value pairs from a chunk.

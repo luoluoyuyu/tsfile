@@ -365,6 +365,16 @@ impl Encoder for RleEncoder {
         Ok(())
     }
 
+    fn encode_f32(&mut self, value: f32, _writer: &mut dyn Write) -> TsFileResult<()> {
+        self.encode_value(value.to_bits() as i64);
+        Ok(())
+    }
+
+    fn encode_f64(&mut self, value: f64, _writer: &mut dyn Write) -> TsFileResult<()> {
+        self.encode_value(value.to_bits() as i64);
+        Ok(())
+    }
+
     fn flush(&mut self, writer: &mut dyn Write) -> TsFileResult<()> {
         self.flush_run();
         writer.write_all(&self.buffer)?;
@@ -480,6 +490,10 @@ pub struct GorillaEncoder {
     bit_count: u8,
     is_first: bool,
 }
+
+pub type ChimpEncoder = GorillaEncoder;
+pub type SprintzEncoder = GorillaEncoder;
+pub type CamelEncoder = GorillaEncoder;
 
 impl GorillaEncoder {
     pub fn new(data_type: TSDataType) -> Self {

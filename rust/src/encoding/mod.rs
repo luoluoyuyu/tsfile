@@ -7,10 +7,11 @@ pub mod encoder;
 pub mod decoder;
 
 pub use encoder::{
-    create_encoder, DictionaryEncoder, EncodableValue, Encoder, GorillaEncoder, PlainEncoder,
-    RleEncoder, Ts2diffEncoder, ZigzagEncoder,
+    create_encoder, CamelEncoder, ChimpEncoder, DictionaryEncoder, EncodableValue, Encoder,
+    GorillaEncoder, PlainEncoder, RleEncoder, SprintzEncoder, Ts2diffEncoder, ZigzagEncoder,
 };
 pub use decoder::{
-    create_decoder, read_next_value, DecodedValue, Decoder, DictionaryDecoder, GorillaDecoder,
-    PlainDecoder, RleDecoder, Ts2diffDecoder, ZigzagDecoder,
+    create_decoder, read_next_value, CamelDecoder, ChimpDecoder, DecodedValue, Decoder,
+    DictionaryDecoder, GorillaDecoder, PlainDecoder, RleDecoder, SprintzDecoder, Ts2diffDecoder,
+    ZigzagDecoder,
 };

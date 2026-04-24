@@ -164,6 +164,17 @@ impl TableSchema {
         Ok(schema)
     }
 
+
+    pub fn columns(&self) -> Vec<ColumnSchema> {
+        self.measurement_schemas
+            .iter()
+            .zip(self.column_categories.iter())
+            .map(|(schema, category)| {
+                ColumnSchema::new(schema.measurement_id.clone(), schema.data_type, *category)
+            })
+            .collect()
+    }
+
     pub fn add_column(
         &mut self,
         mut measurement_schema: MeasurementSchema,
