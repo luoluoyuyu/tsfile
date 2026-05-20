@@ -221,48 +221,73 @@ impl Statistics {
 
     /// Update with a boolean value.
     pub fn update_bool(&mut self, timestamp: i64, value: bool) {
+        let is_first = self.is_empty;
         self.update_time(timestamp);
         if let TypedStats::Boolean(s) = &mut self.typed {
-            s.update(value);
+            if is_first {
+                s.first_value = value;
+                s.is_first = false;
+            }
+            s.last_value = value;
         }
     }
 
     /// Update with an i32 value.
     pub fn update_i32(&mut self, timestamp: i64, value: i32) {
+        let is_first = self.is_empty;
         self.update_time(timestamp);
         if let TypedStats::Integer(s) = &mut self.typed {
+            if is_first {
+                s.first_value = value;
+            }
             s.update(value);
         }
     }
 
     /// Update with an i64 value.
     pub fn update_i64(&mut self, timestamp: i64, value: i64) {
+        let is_first = self.is_empty;
         self.update_time(timestamp);
         if let TypedStats::Long(s) = &mut self.typed {
+            if is_first {
+                s.first_value = value;
+            }
             s.update(value);
         }
     }
 
     /// Update with a f32 value.
     pub fn update_f32(&mut self, timestamp: i64, value: f32) {
+        let is_first = self.is_empty;
         self.update_time(timestamp);
         if let TypedStats::Float(s) = &mut self.typed {
+            if is_first {
+                s.first_value = value;
+            }
             s.update(value);
         }
     }
 
     /// Update with a f64 value.
     pub fn update_f64(&mut self, timestamp: i64, value: f64) {
+        let is_first = self.is_empty;
         self.update_time(timestamp);
         if let TypedStats::Double(s) = &mut self.typed {
+            if is_first {
+                s.first_value = value;
+            }
             s.update(value);
         }
     }
 
     /// Update with a binary value.
     pub fn update_binary(&mut self, timestamp: i64, value: Binary) {
+        let is_first = self.is_empty;
         self.update_time(timestamp);
         if let TypedStats::Binary(s) = &mut self.typed {
+            if is_first {
+                s.first_value = value.clone();
+            }
             s.update(value);
         }
     }
@@ -313,15 +338,92 @@ impl Statistics {
 
     /// Merge another statistics into this one.
     pub fn merge(&mut self, other: &Statistics) {
-        if !other.is_empty {
-            if other.start_time < self.start_time {
-                self.start_time = other.start_time;
+        if other.is_empty {
+            return;
+        }
+
+        if self.is_empty {
+            *self = other.clone();
+            return;
+        }
+
+        let self_start_time = self.start_time;
+        let self_end_time = self.end_time;
+        let other_start_time = other.start_time;
+        let other_end_time = other.end_time;
+
+        if other_start_time < self.start_time {
+            self.start_time = other_start_time;
+        }
+        if other_end_time > self.end_time {
+            self.end_time = other_end_time;
+        }
+        self.count += other.count;
+        self.is_empty = false;
+
+        match (&mut self.typed, &other.typed) {
+            (TypedStats::Boolean(current), TypedStats::Boolean(next)) => {
+                if other_start_time < self_start_time {
+                    current.first_value = next.first_value;
+                }
+                if other_end_time > self_end_time {
+                    current.last_value = next.last_value;
+                }
             }
-            if other.end_time > self.end_time {
-                self.end_time = other.end_time;
+            (TypedStats::Integer(current), TypedStats::Integer(next)) => {
+                current.min_value = current.min_value.min(next.min_value);
+                current.max_value = current.max_value.max(next.max_value);
+                current.sum_value = current.sum_value.wrapping_add(next.sum_value);
+                if other_start_time < self_start_time {
+                    current.first_value = next.first_value;
+                }
+                if other_end_time > self_end_time {
+                    current.last_value = next.last_value;
+                }
             }
-            self.count += other.count;
-            self.is_empty = false;
+            (TypedStats::Long(current), TypedStats::Long(next)) => {
+                current.min_value = current.min_value.min(next.min_value);
+                current.max_value = current.max_value.max(next.max_value);
+                current.sum_value = current.sum_value.wrapping_add(next.sum_value);
+                if other_start_time < self_start_time {
+                    current.first_value = next.first_value;
+                }
+                if other_end_time > self_end_time {
+                    current.last_value = next.last_value;
+                }
+            }
+            (TypedStats::Float(current), TypedStats::Float(next)) => {
+                current.min_value = current.min_value.min(next.min_value);
+                current.max_value = current.max_value.max(next.max_value);
+                current.sum_value += next.sum_value;
+                if other_start_time < self_start_time {
+                    current.first_value = next.first_value;
+                }
+                if other_end_time > self_end_time {
+                    current.last_value = next.last_value;
+                }
+            }
+            (TypedStats::Double(current), TypedStats::Double(next)) => {
+                current.min_value = current.min_value.min(next.min_value);
+                current.max_value = current.max_value.max(next.max_value);
+                current.sum_value += next.sum_value;
+                if other_start_time < self_start_time {
+                    current.first_value = next.first_value;
+                }
+                if other_end_time > self_end_time {
+                    current.last_value = next.last_value;
+                }
+            }
+            (TypedStats::Binary(current), TypedStats::Binary(next)) => {
+                if other_start_time < self_start_time {
+                    current.first_value = next.first_value.clone();
+                }
+                if other_end_time > self_end_time {
+                    current.last_value = next.last_value.clone();
+                }
+            }
+            (TypedStats::Time(_), TypedStats::Time(_)) => {}
+            _ => {}
         }
     }
 

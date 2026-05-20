@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 
+use crate::common::config::get_config;
 use crate::common::enums::{CompressionType, TSDataType, TSEncoding};
 use crate::error::{TsFileError, TsFileResult};
 use crate::utils::ReadWriteIOUtils;
@@ -136,11 +137,12 @@ impl MeasurementSchemaBuilder {
                 "Measurement name cannot be empty".to_string(),
             ));
         }
+        let config = get_config();
         Ok(MeasurementSchemaBuilder {
             measurement_id,
             data_type,
-            encoding: default_encoding(data_type),
-            compression: CompressionType::Lz4,
+            encoding: config.value_encoder(data_type),
+            compression: config.compressor(data_type),
             props: HashMap::new(),
         })
     }
@@ -175,19 +177,6 @@ impl MeasurementSchemaBuilder {
         );
         schema.validate()?;
         Ok(schema)
-    }
-}
-
-fn default_encoding(data_type: TSDataType) -> TSEncoding {
-    match data_type {
-        TSDataType::Boolean | TSDataType::Text | TSDataType::Blob | TSDataType::String => {
-            TSEncoding::Plain
-        }
-        TSDataType::Float | TSDataType::Double => TSEncoding::Gorilla,
-        TSDataType::Int32 | TSDataType::Int64 | TSDataType::Timestamp | TSDataType::Date => {
-            TSEncoding::Ts2diff
-        }
-        _ => TSEncoding::Plain,
     }
 }
 

@@ -55,6 +55,9 @@ pub enum TsFileError {
     #[error("Invalid magic string")]
     InvalidMagicString,
 
+    #[error("Invalid file version: {0}")]
+    InvalidVersion(u8),
+
     #[error("Invalid file format: {0}")]
     InvalidFileFormat(String),
 

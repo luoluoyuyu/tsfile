@@ -98,21 +98,44 @@ pub trait Decoder: Send + Sync {
     fn reset(&mut self);
 }
 
+pub struct UnsupportedDecoder {
+    data_type: TSDataType,
+    encoding: TSEncoding,
+}
+
+impl UnsupportedDecoder {
+    pub fn new(data_type: TSDataType, encoding: TSEncoding) -> Self {
+        UnsupportedDecoder { data_type, encoding }
+    }
+}
+
+impl Decoder for UnsupportedDecoder {
+    fn init(&mut self, _data: &[u8]) -> TsFileResult<()> {
+        Err(TsFileError::UnsupportedOperation(format!(
+            "Decoding {} is not implemented for data type {}",
+            self.encoding, self.data_type
+        )))
+    }
+
+    fn has_next(&self) -> bool {
+        false
+    }
+
+    fn reset(&mut self) {}
+}
+
 /// Create a decoder for the given data type and encoding.
 pub fn create_decoder(data_type: TSDataType, encoding: TSEncoding) -> Box<dyn Decoder> {
     match encoding {
         TSEncoding::Plain => Box::new(PlainDecoder::new(data_type)),
         TSEncoding::Dictionary => Box::new(DictionaryDecoder::new()),
         TSEncoding::Rle => Box::new(RleDecoder::new(data_type)),
-        TSEncoding::Diff | TSEncoding::Zigzag => Box::new(ZigzagDecoder::new(data_type)),
+        TSEncoding::Zigzag => Box::new(ZigzagDecoder::new(data_type)),
         TSEncoding::Ts2diff => Box::new(Ts2diffDecoder::new(data_type)),
         TSEncoding::Gorilla | TSEncoding::GorillaV1 => {
             Box::new(GorillaDecoder::new(data_type))
         }
-        TSEncoding::Chimp | TSEncoding::Sprintz | TSEncoding::Rlbe | TSEncoding::Camel => {
-            Box::new(GorillaDecoder::new(data_type))
-        }
-        _ => Box::new(PlainDecoder::new(data_type)),
+        _ => Box::new(UnsupportedDecoder::new(data_type, encoding)),
     }
 }
 

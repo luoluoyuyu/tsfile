@@ -3,7 +3,7 @@
 
 //! TsFile configuration.
 
-use crate::common::enums::{CompressionType, TSEncoding};
+use crate::common::enums::{CompressionType, TSDataType, TSEncoding};
 
 /// TsFile configuration parameters, mirroring Java's TSFileConfig.
 #[derive(Debug, Clone)]
@@ -72,6 +72,60 @@ impl TsFileConfig {
     /// Create a new TsFileConfig with default values.
     pub fn new() -> Self {
         TsFileConfig::default()
+    }
+
+    pub fn group_size_in_byte(&self) -> usize {
+        self.group_size_in_byte
+    }
+
+    pub fn set_group_size_in_byte(&mut self, group_size_in_byte: usize) {
+        self.group_size_in_byte = group_size_in_byte;
+    }
+
+    pub fn page_size_in_byte(&self) -> usize {
+        self.page_size_in_byte
+    }
+
+    pub fn set_page_size_in_byte(&mut self, page_size_in_byte: usize) {
+        self.page_size_in_byte = page_size_in_byte.min(self.group_size_in_byte);
+    }
+
+    pub fn max_number_of_points_in_page(&self) -> usize {
+        self.max_number_of_points_in_page
+    }
+
+    pub fn set_max_number_of_points_in_page(&mut self, max_number_of_points_in_page: usize) {
+        self.max_number_of_points_in_page = max_number_of_points_in_page;
+    }
+
+    pub fn float_precision(&self) -> u32 {
+        self.float_precision
+    }
+
+    pub fn set_float_precision(&mut self, float_precision: u32) {
+        self.float_precision = float_precision;
+    }
+
+    pub fn set_compressor(&mut self, compressor: CompressionType) {
+        self.compressor = compressor;
+    }
+
+    pub fn compressor(&self, _data_type: TSDataType) -> CompressionType {
+        self.compressor
+    }
+
+    pub fn value_encoder(&self, data_type: TSDataType) -> TSEncoding {
+        match data_type {
+            TSDataType::Boolean => self.default_boolean_encoding,
+            TSDataType::Int32 | TSDataType::Date => self.default_int32_encoding,
+            TSDataType::Int64 | TSDataType::Timestamp => self.default_int64_encoding,
+            TSDataType::Float => self.default_float_encoding,
+            TSDataType::Double => self.default_double_encoding,
+            TSDataType::Text | TSDataType::String | TSDataType::Blob => {
+                self.default_text_encoding
+            }
+            _ => TSEncoding::Plain,
+        }
     }
 }
 

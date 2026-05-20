@@ -36,13 +36,8 @@ pub fn create_compressor(compression: CompressionType) -> Box<dyn Compressor> {
         CompressionType::Lzo | CompressionType::Sdt | CompressionType::Paa | CompressionType::Pla => {
             Box::new(UnsupportedCompressor { compression_type: compression })
         }
-        CompressionType::Zstd => {
-            log::warn!("ZSTD compression not supported, using uncompressed");
-            Box::new(UncompressedCompressor)
-        }
-        CompressionType::Lzma2 => {
-            log::warn!("LZMA2 compression not supported, using uncompressed");
-            Box::new(UncompressedCompressor)
+        CompressionType::Zstd | CompressionType::Lzma2 => {
+            Box::new(UnsupportedCompressor { compression_type: compression })
         }
     }
 }
@@ -57,13 +52,8 @@ pub fn create_decompressor(compression: CompressionType) -> Box<dyn Decompressor
         CompressionType::Lzo | CompressionType::Sdt | CompressionType::Paa | CompressionType::Pla => {
             Box::new(UnsupportedDecompressor { compression_type: compression })
         }
-        CompressionType::Zstd => {
-            log::warn!("ZSTD decompression not supported, assuming uncompressed");
-            Box::new(UncompressedDecompressor)
-        }
-        CompressionType::Lzma2 => {
-            log::warn!("LZMA2 decompression not supported, assuming uncompressed");
-            Box::new(UncompressedDecompressor)
+        CompressionType::Zstd | CompressionType::Lzma2 => {
+            Box::new(UnsupportedDecompressor { compression_type: compression })
         }
     }
 }

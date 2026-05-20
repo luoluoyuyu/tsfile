@@ -10,6 +10,7 @@ use std::path::Path;
 
 use crate::error::{TsFileError, TsFileResult};
 use crate::file::metadata::chunk_metadata::ChunkMetadata;
+use crate::file::metadata::{ColumnCategory, ColumnSchema, TableSchema};
 use crate::write::chunk::ChunkWriter;
 use crate::write::api::{DataWriter, TsFileWriteApi};
 use crate::write::record::{DataPointValue, TSRecord};
@@ -41,6 +42,14 @@ pub struct TsFileWriter {
     is_unseq: bool,
     /// Last timestamps per device for sequential check.
     last_timestamps: HashMap<String, i64>,
+    /// Named schema templates for bulk device registration.
+    schema_templates: HashMap<String, Vec<MeasurementSchema>>,
+    /// Registered table schemas tracked at the high-level writer.
+    registered_table_schemas: HashMap<String, TableSchema>,
+    /// Whether table writes should be treated as aligned writes.
+    table_write_aligned: bool,
+    /// Whether table writes should auto-generate table schema from tablets.
+    generate_table_schema: bool,
 }
 
 impl TsFileWriter {
@@ -56,6 +65,10 @@ impl TsFileWriter {
             chunk_group_size_threshold: 128 * 1024 * 1024, // 128MB
             is_unseq: false,
             last_timestamps: HashMap::new(),
+            schema_templates: HashMap::new(),
+            registered_table_schemas: HashMap::new(),
+            table_write_aligned: true,
+            generate_table_schema: false,
         })
     }
 
@@ -70,6 +83,10 @@ impl TsFileWriter {
         self.chunk_group_size_threshold = threshold;
     }
 
+    pub fn set_memory_threshold(&mut self, threshold: usize) {
+        self.set_chunk_group_size_threshold(threshold);
+    }
+
     pub fn set_unseq(&mut self, is_unseq: bool) {
         self.is_unseq = is_unseq;
     }
@@ -80,6 +97,93 @@ impl TsFileWriter {
 
     pub fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    pub fn get_schema(&self) -> &Schema {
+        self.schema()
+    }
+
+    pub fn get_io_writer(&mut self) -> &mut TsFileIOWriter {
+        &mut self.io_writer
+    }
+
+    pub fn register_device(&mut self, device_id: String) {
+        self.schema.measurement_schemas.entry(device_id).or_default();
+    }
+
+    pub fn register_table_schema(&mut self, table_schema: TableSchema) -> TsFileResult<()> {
+        self.registered_table_schemas
+            .insert(table_schema.table_name.clone(), table_schema.clone());
+        self.io_writer.register_table_schema(table_schema);
+        Ok(())
+    }
+
+    pub fn register_schema_template<I>(
+        &mut self,
+        template_name: String,
+        schemas: I,
+    ) -> TsFileResult<()>
+    where
+        I: IntoIterator<Item = MeasurementSchema>,
+    {
+        if template_name.trim().is_empty() {
+            return Err(TsFileError::SchemaError(
+                "Schema template name must not be empty".to_string(),
+            ));
+        }
+
+        let mut template_schemas = Vec::new();
+        for schema in schemas {
+            schema.validate()?;
+            template_schemas.push(schema);
+        }
+        if template_schemas.is_empty() {
+            return Err(TsFileError::SchemaError(format!(
+                "Schema template {} must contain at least one measurement",
+                template_name
+            )));
+        }
+
+        self.schema_templates.insert(template_name, template_schemas);
+        Ok(())
+    }
+
+    pub fn register_device_from_template(
+        &mut self,
+        device_id: String,
+        template_name: &str,
+    ) -> TsFileResult<()> {
+        let template = self
+            .schema_templates
+            .get(template_name)
+            .cloned()
+            .ok_or_else(|| {
+                TsFileError::SchemaError(format!(
+                    "Schema template {} is not registered",
+                    template_name
+                ))
+            })?;
+        self.register_timeseries_batch(device_id, template)
+    }
+
+    pub fn is_table_write_aligned(&self) -> bool {
+        self.table_write_aligned
+    }
+
+    pub fn set_table_write_aligned(&mut self, table_write_aligned: bool) {
+        self.table_write_aligned = table_write_aligned;
+    }
+
+    pub fn is_generate_table_schema(&self) -> bool {
+        self.generate_table_schema
+    }
+
+    pub fn set_generate_table_schema(&mut self, generate_table_schema: bool) {
+        self.generate_table_schema = generate_table_schema;
+    }
+
+    pub fn registered_table_schemas(&self) -> &HashMap<String, TableSchema> {
+        &self.registered_table_schemas
     }
 
     /// Register a timeseries measurement schema for a device.
@@ -104,6 +208,17 @@ impl TsFileWriter {
         }
         self.schema.register_timeseries(device_id, schema)?;
         Ok(())
+    }
+
+    pub fn register_aligned_timeseries<I>(
+        &mut self,
+        device_id: String,
+        schemas: I,
+    ) -> TsFileResult<()>
+    where
+        I: IntoIterator<Item = MeasurementSchema>,
+    {
+        self.register_timeseries_batch(device_id, schemas)
     }
 
     pub fn register_timeseries_batch<I>(
@@ -215,6 +330,10 @@ impl TsFileWriter {
         Ok(true)
     }
 
+    pub fn write_record(&mut self, record: TSRecord) -> TsFileResult<bool> {
+        self.write(record)
+    }
+
     /// Write all rows in a tablet batch.
     pub fn write_tablet(&mut self, tablet: &Tablet) -> TsFileResult<usize> {
         for schema in &tablet.schemas {
@@ -226,6 +345,23 @@ impl TsFileWriter {
             self.write(record)?;
         }
         Ok(row_count)
+    }
+
+    pub fn write_aligned(&mut self, tablet: &Tablet) -> TsFileResult<usize> {
+        self.write_tablet(tablet)
+    }
+
+    pub fn write_table(&mut self, tablet: &Tablet) -> TsFileResult<usize> {
+        self.ensure_table_schema_for_tablet(tablet)?;
+        if self.table_write_aligned {
+            self.write_aligned(tablet)
+        } else {
+            self.write_tablet(tablet)
+        }
+    }
+
+    pub fn write_tree(&mut self, tablet: &Tablet) -> TsFileResult<usize> {
+        self.write_tablet(tablet)
     }
 
     /// Write a tablet and reset it after successful flush, matching Java's common usage pattern.
@@ -247,6 +383,36 @@ impl TsFileWriter {
         Ok(())
     }
 
+    pub fn flush(&mut self) -> TsFileResult<()> {
+        self.flush_all_chunk_groups()?;
+        self.io_writer.flush()
+    }
+
+    fn ensure_table_schema_for_tablet(&mut self, tablet: &Tablet) -> TsFileResult<()> {
+        if !self.generate_table_schema {
+            return Ok(());
+        }
+
+        let table_name = table_name_from_device(&tablet.device_id);
+        if self.registered_table_schemas.contains_key(&table_name) {
+            return Ok(());
+        }
+
+        let columns = tablet
+            .schemas
+            .iter()
+            .map(|schema| {
+                ColumnSchema::new(
+                    schema.measurement_id.clone(),
+                    schema.data_type,
+                    ColumnCategory::Field,
+                )
+            })
+            .collect();
+        let table_schema = TableSchema::from_columns(table_name, columns)?;
+        self.register_table_schema(table_schema)
+    }
+
     fn flush_chunk_group(&mut self, device_id: &str) -> TsFileResult<()> {
         let mut writers = match self.chunk_writers.remove(device_id) {
             Some(w) => w,
@@ -260,7 +426,8 @@ impl TsFileWriter {
         self.io_writer.start_chunk_group(device_id.to_string())?;
 
         // Sort measurement IDs to ensure deterministic order
-        let measurement_ids: Vec<String> = writers.keys().cloned().collect();
+        let mut measurement_ids: Vec<String> = writers.keys().cloned().collect();
+        measurement_ids.sort();
         for measurement_id in measurement_ids {
             let mut chunk_writer = writers.remove(&measurement_id).unwrap();
             if !chunk_writer.has_data() {
@@ -293,6 +460,14 @@ impl TsFileWriter {
         self.io_writer.end_file()?;
         Ok(())
     }
+}
+
+fn table_name_from_device(device_id: &str) -> String {
+    device_id
+        .split('.')
+        .next()
+        .unwrap_or(device_id)
+        .to_lowercase()
 }
 
 impl DataWriter for TsFileWriter {

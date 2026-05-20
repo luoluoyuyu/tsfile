@@ -276,9 +276,6 @@ impl TSEncoding {
                     | TSEncoding::Ts2diff
                     | TSEncoding::Gorilla
                     | TSEncoding::Zigzag
-                    | TSEncoding::Chimp
-                    | TSEncoding::Sprintz
-                    | TSEncoding::Rlbe
             ),
             TSDataType::Float => matches!(
                 self,
@@ -287,9 +284,6 @@ impl TSEncoding {
                     | TSEncoding::Ts2diff
                     | TSEncoding::GorillaV1
                     | TSEncoding::Gorilla
-                    | TSEncoding::Chimp
-                    | TSEncoding::Sprintz
-                    | TSEncoding::Rlbe
             ),
             TSDataType::Double => matches!(
                 self,
@@ -298,10 +292,6 @@ impl TSEncoding {
                     | TSEncoding::Ts2diff
                     | TSEncoding::GorillaV1
                     | TSEncoding::Gorilla
-                    | TSEncoding::Chimp
-                    | TSEncoding::Sprintz
-                    | TSEncoding::Rlbe
-                    | TSEncoding::Camel
             ),
             TSDataType::Text | TSDataType::String => {
                 matches!(self, TSEncoding::Plain | TSEncoding::Dictionary)

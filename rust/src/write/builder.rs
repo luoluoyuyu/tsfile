@@ -37,6 +37,10 @@ impl TsFileWriterBuilder {
         self
     }
 
+    pub fn with_memory_threshold(self, threshold: usize) -> Self {
+        self.with_chunk_group_size_threshold(threshold)
+    }
+
     pub fn with_unseq(mut self, is_unseq: bool) -> Self {
         self.is_unseq = is_unseq;
         self

@@ -10,8 +10,8 @@ impl TsFileConstant {
     /// The magic string at the beginning and end of a TsFile.
     pub const MAGIC_STRING: &'static str = "TsFile";
 
-    /// The version number byte of TsFile.
-    pub const VERSION_NUMBER: u8 = 3;
+    /// The version number byte of the current TsFile format.
+    pub const VERSION_NUMBER: u8 = 4;
 
     /// Bit mask indicating a time chunk (aligned series).
     pub const TIME_COLUMN_MASK: u8 = 0x80;

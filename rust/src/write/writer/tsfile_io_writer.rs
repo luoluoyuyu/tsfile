@@ -15,6 +15,7 @@ use crate::file::header::ChunkGroupHeader;
 use crate::file::meta_marker::MetaMarker;
 use crate::file::metadata::chunk_metadata::{ChunkGroupMetadata, ChunkMetadata};
 use crate::file::metadata::metadata_index_node::{MetadataIndexEntry, MetadataIndexNode};
+use crate::file::metadata::table_schema::TableSchema;
 use crate::file::metadata::timeseries_metadata::TimeseriesMetadata;
 use crate::file::metadata::tsfile_metadata::TsFileMetadata;
 use crate::utils::bloom_filter::BloomFilter;
@@ -35,6 +36,8 @@ pub struct TsFileIOWriter {
     current_chunk_metadata_list: Vec<ChunkMetadata>,
     /// Path count for bloom filter.
     path_count: usize,
+    /// Registered table schemas to persist in the footer for v4 table reads.
+    table_schema_map: HashMap<String, TableSchema>,
     /// Position marked for recoverable append/reset operations.
     marked_position: Option<u64>,
     /// Whether this writer still accepts writes.
@@ -58,6 +61,7 @@ impl TsFileIOWriter {
             current_device_id: None,
             current_chunk_metadata_list: Vec::new(),
             path_count: 0,
+            table_schema_map: HashMap::new(),
             marked_position: None,
             can_write: true,
             has_footer: false,
@@ -104,6 +108,11 @@ impl TsFileIOWriter {
     pub fn flush(&mut self) -> TsFileResult<()> {
         self.writer.flush()?;
         Ok(())
+    }
+
+    pub fn register_table_schema(&mut self, table_schema: TableSchema) {
+        self.table_schema_map
+            .insert(table_schema.table_name.clone(), table_schema);
     }
 
     /// Mark the current logical write position for later reset.
@@ -264,12 +273,15 @@ impl TsFileIOWriter {
         // Build root device index node (LEAF_DEVICE for V3 compatibility)
         // For V3, this will be inlined in TsFileMetadata
         // Using LEAF_DEVICE so Java can extract deviceId from DeviceMetadataIndexEntry
+        let mut device_entries: Vec<(String, i64)> = device_to_node_offset.into_iter().collect();
+        device_entries.sort_by(|left, right| left.0.cmp(&right.0));
+
         let mut root_device_node = MetadataIndexNode::new(
             MetadataIndexNodeType::LeafDevice,
             0, // Will be set when serialized inline
         );
-        for (device_id, node_offset) in device_to_node_offset {
-            root_device_node.add_child(MetadataIndexEntry::new(device_id, node_offset));
+        for (device_id, node_offset) in &device_entries {
+            root_device_node.add_child(MetadataIndexEntry::new(device_id.clone(), *node_offset));
         }
         
         // Set end offset for root node
@@ -295,6 +307,22 @@ impl TsFileIOWriter {
 
         // Empty table name is used by Java for tree-model device metadata.
         file_metadata.add_table_metadata_index_node(String::new(), root_device_node);
+        let single_table_mode = self.table_schema_map.len() == 1;
+        for (table_name, table_schema) in &self.table_schema_map {
+            file_metadata.add_table_schema(table_name.clone(), table_schema.clone());
+
+            let mut table_root = MetadataIndexNode::new(MetadataIndexNodeType::LeafDevice, 0);
+            for (device_id, node_offset) in &device_entries {
+                if single_table_mode || device_matches_table(device_id, table_name) {
+                    table_root.add_child(MetadataIndexEntry::new(
+                        device_id.clone(),
+                        *node_offset,
+                    ));
+                }
+            }
+            table_root.end_offset = self.position as i64;
+            file_metadata.add_table_metadata_index_node(table_name.clone(), table_root);
+        }
 
         // Serialize the TsFileMetadata
         let mut meta_buf = Vec::new();
@@ -340,16 +368,22 @@ impl TsFileIOWriter {
 
         // Convert to timeseries metadata list
         let mut result = Vec::new();
-        for ((device_id, measurement_id), chunks) in device_measurement_chunks {
+        for ((device_id, measurement_id), mut chunks) in device_measurement_chunks {
+            chunks.sort_by_key(|chunk| chunk.offset_of_chunk_header);
+
             // Build TimeseriesMetadata for this series
             // time_series_metadata_type: bit 0-5 indicates if chunk has statistics
             // 1 = has statistics, 0 = no statistics (single chunk case)
             let has_statistics = if chunks.len() > 1 { 1 } else { 0 };
+            let mut merged_statistics = chunks[0].statistics.clone();
+            for chunk in chunks.iter().skip(1) {
+                merged_statistics.merge(&chunk.statistics);
+            }
             let mut ts_meta = TimeseriesMetadata::new(
                 has_statistics,
                 measurement_id.clone(),
                 chunks[0].data_type,
-                chunks[0].statistics.clone(),
+                merged_statistics,
             );
             ts_meta.chunk_metadata_list = chunks;
             result.push((device_id, measurement_id, ts_meta));
@@ -400,4 +434,14 @@ impl TsFileIOWriter {
         Ok(leaf_node)
     }
 
+}
+
+fn device_matches_table(device_id: &str, table_name: &str) -> bool {
+    let normalized_device_id = device_id.to_lowercase();
+    let normalized_table_name = table_name.to_lowercase();
+
+    normalized_device_id == normalized_table_name
+        || normalized_device_id
+            .strip_prefix(&normalized_table_name)
+            .is_some_and(|rest| rest.starts_with('.'))
 }
